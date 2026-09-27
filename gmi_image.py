@@ -1,0 +1,143 @@
+"""GMI Cloud 的圖片生成（request queue API）：GPT Image 2.5（Sunburst、Flare）和 GPT Image 2。
+
+模型說明：GET {BASE_URL}/models/<model>（公開文件站 2026-09 還沒有 2.5，參數和
+https://docs.gmicloud.ai/model-quickstarts/image/gpt-image-2-edit 同一套）。
+給 video_ui.py 用；各模型的參數範圍與價格在 image_models.py。查詢狀態沿用 gmi_video 的 wait_for_task。
+
+- 每個模型分成 -generate（文字生圖）和 -edit（參考圖編輯）；edit 的 image 可以是網址、base64 data URI，或最多 16 個的陣列。
+- GPT Image 2 的錯誤訊息比較具體（例如「size dimensions must be multiples of 16」「failed to fetch image」），
+  2.5 的錯誤一律是下面那句 Generation rejected。
+- 同步模型（模型說明的 delivery_mode 是 sync）：POST /requests 要等圖片生成完才回應，成功時回傳的請求物件裡
+  直接有 outcome.media_urls；失敗時回 HTTP 400 {"error", "request_id"}，請求紀錄是 status failed、
+  outcome.error {code, message, status}。2026-09 實測：參考圖網址打不開時約 3 秒就回 400
+  「Generation rejected; please review the prompt and parameters then retry」（status INVALID_INPUT）。
+- 送出後逾時或連線中斷時，請求可能已經建立而且扣款了，不能重送：用 find_by_payload() 從請求列表找回。
+- 計價：建立請求時預扣，預扣的金額就是最終價格；quality 送 auto 或不送會按 max 計價，所以一定要送明確的品質。
+"""
+import os
+import re
+
+import requests
+
+from gmi_video import BASE_URL, STATUS, failure_reason
+from mixroute_video import FAILED, check_http
+
+
+class RequestFailed(RuntimeError):
+    """GMI 回報這個請求失敗了；request_id 是 GMI 留下的請求紀錄（有的話）。"""
+
+    def __init__(self, message, request_id=None):
+        super().__init__(message)
+        self.request_id = request_id
+
+
+class LostResponse(RuntimeError):
+    """送出後沒拿到結果（逾時、連線中斷、閘道錯誤頁）：請求可能已經建立，要從請求列表找回，不能重送。"""
+
+
+def parse_prices(info):
+    """按像素數計價的模型（GPT Image 2.5）：從 pricing_details 取出 1024×1024 每張的價格：「low $0.0059, medium $0.0132, …」。"""
+    text = str(info.get("pricing_details") or "")
+    return {q: float(p) for q, p in re.findall(r"\b(low|medium|high|xhigh|max)\s+\$\s*(\d+(?:\.\d+)?)", text)}
+
+
+def parse_size_prices(info):
+    """按尺寸計價的模型（GPT Image 2）：「low 1024x1024=$0.010, low 1024x1536=$0.020; …」→
+    {"1024x1536": {"low": 0.02, …}, …}，寬高小的在前（1536x1024 和 1024x1536 同價）。"""
+    text = str(info.get("pricing_details") or "")
+    prices = {}
+    for q, w, h, p in re.findall(r"\b(low|medium|high|xhigh|max)\s+(\d+)x(\d+)\s*=\s*\$\s*(\d+(?:\.\d+)?)", text):
+        w, h = int(w), int(h)
+        prices.setdefault(f"{min(w, h)}x{max(w, h)}", {})[q] = float(p)
+    return prices
+
+
+def build_payload(prompt, parameters, images=()):
+    """parameters 是 video_ui 檢查過的 size、quality、n…；有參考圖時加上 image（一律送陣列）。"""
+    payload = {"prompt": prompt, **parameters}
+    if images:
+        payload["image"] = list(images)
+    return payload
+
+
+def create(session, model, payload, timeout=900):
+    """送出請求並等它生成完，回傳 GMI 的請求物件（request_id、status、outcome）。
+
+    GMI 回報失敗時拋出 RequestFailed；沒拿到結果時拋出 LostResponse（這時不要重送）。
+    """
+    try:
+        resp = session.post(f"{BASE_URL}/requests", json={"model": model, "payload": payload}, timeout=(30, timeout))
+    except requests.RequestException as e:  # 包括收到一半斷線（ChunkedEncodingError），這時請求多半已經建立
+        what = "逾時" if isinstance(e, requests.Timeout) else "連線中斷"
+        raise LostResponse(f"等 GMI 回應時{what}") from None
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        if resp.status_code >= 500:  # 閘道回的錯誤頁：上游可能還在生成
+            raise LostResponse(f"GMI 回傳 HTTP {resp.status_code} 錯誤頁")
+        check_http(resp)
+        raise RuntimeError(f"GMI 回傳的不是 JSON：{resp.text[:300]}")
+    if not resp.ok:
+        err = data.get("error")
+        msg = (err.get("message") if isinstance(err, dict) else err) or data.get("message") or resp.text[:300]
+        raise RequestFailed(f"HTTP {resp.status_code}：{msg}", data.get("request_id"))
+    if STATUS.get(str(data.get("status", "")).lower()) in FAILED:
+        raise RequestFailed(str(failure_reason(data)), data.get("request_id"))
+    if not data.get("request_id"):
+        raise RuntimeError(f"建立請求失敗：{str(data)[:300]}")
+    return data
+
+
+def find_by_payload(session, model, payload, since, exclude=(), pages=2):
+    """從請求列表找出 since（秒）之後建立、payload 完全相同的請求；沒拿到 request_id 時用來找回。"""
+    for page in range(pages):
+        resp = session.get(f"{BASE_URL}/requests", params={"model_id": model, "limit": 100, "offset": page * 100}, timeout=30)
+        check_http(resp)
+        data = resp.json()
+        for r in data.get("requests") or []:
+            if r.get("request_id") not in exclude and (r.get("created_at") or 0) >= since - 60 and r.get("payload") == payload:
+                return r
+        if not data.get("has_more"):
+            break
+    return None
+
+
+def image_urls(task):
+    """生成的圖片網址，照 GMI 回傳的順序。"""
+    urls = []
+    for m in (task.get("outcome") or {}).get("media_urls") or []:
+        url = m.get("url") if isinstance(m, dict) else m
+        if isinstance(url, str) and url:
+            urls.append(url)
+    return urls
+
+
+def sniff(head):
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def download(url, folder, stem, fmt=None):
+    """下載一張圖片存成 folder/<stem>.<副檔名>，副檔名看檔案內容（認不出來才用 output_format），回傳路徑。
+
+    圖片網址本身就能下載，不帶 API key；先寫到 .part 再改名，中途失敗不會留下看似完整的檔案。
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    part = folder / f"{stem}.part"
+    with requests.get(url, stream=True, timeout=120) as resp:
+        check_http(resp)
+        with open(part, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1 << 20):
+                f.write(chunk)
+    with open(part, "rb") as f:
+        ext = sniff(f.read(12)) or {"jpeg": "jpg"}.get(fmt, fmt) or "png"
+    path = folder / f"{stem}.{ext}"
+    os.replace(part, path)
+    return path

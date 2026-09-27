@@ -1,0 +1,2468 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>影片生成</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235a4ee6'/%3E%3Cstop offset='1' stop-color='%23b04fe6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='13.5' fill='url(%23g)'/%3E%3Cpath d='M25.5 20.4L25.5 43.6L45.7 32Z' fill='%23fff' stroke='%23fff' stroke-width='7' stroke-linejoin='round'/%3E%3Cpath d='M47.9 10.4Q48.8 15.2 53.6 16.1Q48.8 17 47.9 21.8Q47 17 42.2 16.1Q47 15.2 47.9 10.4Z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f5f7; --panel: #ffffff; --panel-2: #f0f0f4; --border: #e2e2e9; --border-strong: #cfcfd9;
+  --text: #1c1c22; --muted: #6a6a77; --faint: #9b9ba6;
+  --accent: #5a4ee6; --accent-hover: #4a3fd3; --accent-weak: #eeecff; --accent-text: #ffffff;
+  --ok: #17864a; --ok-weak: #e3f5ea; --warn: #9a6200; --warn-weak: #fff3dc; --err: #cc3a3a; --err-weak: #fdeaea;
+  --run: #2563c9; --run-weak: #e6efff;
+  --shadow: 0 1px 2px rgba(20, 20, 40, .05), 0 2px 8px rgba(20, 20, 40, .04);
+  --radius: 12px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111115; --panel: #1a1a20; --panel-2: #22222a; --border: #2d2d37; --border-strong: #3c3c48;
+    --text: #ececf1; --muted: #a0a0ad; --faint: #6f6f7c;
+    --accent: #8a80ff; --accent-hover: #9d95ff; --accent-weak: #29264a; --accent-text: #15131f;
+    --ok: #4cc47f; --ok-weak: #173323; --warn: #e3a93e; --warn-weak: #3a2c10; --err: #f07070; --err-weak: #3d1a1a;
+    --run: #6ea1ff; --run-weak: #1a2640;
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+h1, h2, h3 { margin: 0; font-weight: 650; }
+a { color: var(--accent); }
+
+/* ---------- 頂部 ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap;
+  padding: 10px 24px; background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+}
+.top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logo { width: 32px; height: 32px; flex: none; display: block; }
+.brand h1 { font-size: 16px; line-height: 1.2; }
+.brand p { margin: 0; font-size: 12px; color: var(--muted); }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel); font-size: 13px; white-space: nowrap;
+}
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.pill.ok::before { background: var(--ok); }
+.pill.bad { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
+.pill.bad::before { background: var(--err); }
+.switch { display: flex; align-items: center; gap: 6px; }
+.switch > span { font-size: 12px; color: var(--muted); }
+.switch select {
+  appearance: none; -webkit-appearance: none; min-width: 150px; padding: 4px 30px 4px 12px; border-radius: 9px;
+  border: 1px solid var(--border); background-color: var(--panel-2); font-size: 13px; font-weight: 600; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8a96' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 11px center; background-size: 10px 6px;
+}
+.switch select:hover { border-color: var(--border-strong); }
+
+.file-warning {
+  max-width: 1392px; margin: 16px auto 0; padding: 12px 16px; border-radius: var(--radius);
+  background: var(--err-weak); color: var(--err); border: 1px solid color-mix(in srgb, var(--err) 35%, transparent);
+  display: flex; flex-direction: column; gap: 2px;
+}
+@media (max-width: 1440px) { .file-warning { margin: 16px 24px 0; } }
+@media (max-width: 980px) { .file-warning { margin: 12px 16px 0; } }
+
+/* ---------- 版面 ---------- */
+.layout {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px;
+  max-width: 1440px; margin: 0 auto; padding: 20px 24px 60px; align-items: start;
+}
+.composer { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tasks { position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow: auto; min-width: 0; padding-right: 2px; }
+@media (max-width: 980px) {
+  .layout { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 48px; }
+  .tasks { position: static; max-height: none; overflow: visible; }
+  .topbar { padding: 10px 16px; }
+}
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; box-shadow: var(--shadow); min-width: 0;
+}
+.card-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.card-h h2 { font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
+.count { font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.count.over { color: var(--err); }
+.desc { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+
+/* ---------- 模式切換 ---------- */
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode-btn {
+  text-align: left; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--panel-2); display: flex; flex-direction: column; gap: 2px;
+}
+.mode-btn b { font-size: 15px; }
+.mode-btn small { color: var(--muted); font-size: 12px; }
+.mode-btn[aria-selected="true"] { border-color: var(--accent); background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
+.mode-btn[aria-selected="true"] b { color: var(--accent); }
+
+.notice {
+  display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 10px;
+  background: var(--panel-2); color: var(--muted); font-size: 12.5px;
+}
+.notice select { padding: 1px 4px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--panel); }
+
+/* ---------- 素材 ---------- */
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+.thumb {
+  position: relative; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2);
+  overflow: hidden; aspect-ratio: 3 / 4; cursor: grab; user-select: none;
+}
+.thumb img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.thumb.dragging { opacity: .4; }
+.thumb.drop-before { box-shadow: -4px 0 0 0 var(--accent); }
+.thumb.drop-after { box-shadow: 4px 0 0 0 var(--accent); }
+.thumb .info {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 6px 4px; font-size: 11px; color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .7)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tag {
+  display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 6px; font-size: 12px; font-weight: 650;
+  background: var(--accent); color: var(--accent-text); white-space: nowrap;
+}
+.thumb .tag { position: absolute; left: 6px; top: 6px; }
+.x-btn {
+  position: absolute; right: 5px; top: 5px; width: 24px; height: 24px; border-radius: 50%; border: 0;
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 15px; line-height: 1; display: grid; place-items: center;
+}
+.x-btn:hover { background: var(--err); }
+.thumb .state {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 8px;
+  font-size: 12px; background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.thumb.error { border-color: var(--err); }
+.thumb.error .state { color: var(--err); background: color-mix(in srgb, var(--err-weak) 88%, transparent); }
+.thumb .problem {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 6px; font-size: 11px; line-height: 1.35;
+  color: #fff; background: color-mix(in srgb, var(--err) 90%, transparent);
+}
+.thumb .note-dot {
+  position: absolute; right: 8px; top: 35px; width: 20px; height: 20px; border-radius: 50%; cursor: help;
+  background: var(--warn); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center;
+}
+.add-tile {
+  border: 1.5px dashed var(--border-strong); border-radius: 10px; background: transparent; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 92px; padding: 10px; font-size: 12.5px; text-align: center;
+}
+.thumbs .add-tile { aspect-ratio: 3 / 4; }
+.add-tile:hover, body.file-drag [data-drop] .add-tile, body.file-drag .frame-slot.empty { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+.add-tile .plus { font-size: 22px; line-height: 1; }
+.rows .add-tile { min-height: 52px; flex-direction: row; gap: 8px; }
+.drop-hot { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 12px; }
+
+.rows { display: flex; flex-direction: column; gap: 8px; }
+.row {
+  display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--panel-2); min-width: 0;
+}
+.row.error { border-color: var(--err); background: var(--err-weak); }
+.row .media { width: 96px; height: 54px; border-radius: 6px; background: #000; object-fit: contain; flex: none; }
+.row audio { width: 220px; max-width: 40%; height: 32px; flex: none; }
+.row .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+.row .sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row.error .sub { color: var(--err); white-space: normal; }
+.row .icon { width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center; background: var(--panel); border: 1px solid var(--border); font-size: 18px; flex: none; }
+.row .x-btn { position: static; flex: none; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.url-row { display: flex; gap: 8px; margin-top: 10px; }
+.url-row input { flex: 1; min-width: 0; }
+.spin {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px;
+  border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 首尾幀 */
+.frames { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: stretch; }
+.frames .arrow { align-self: center; color: var(--faint); font-size: 22px; }
+.frame-slot { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.frame-slot h3 { font-size: 14px; }
+.frame-slot h3 small { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.frame-box { position: relative; aspect-ratio: 1 / 1; }
+.frame-box > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+.frame-box .thumb { aspect-ratio: auto; cursor: default; }
+@media (max-width: 640px) {
+  .frames { grid-template-columns: 1fr; }
+  .frames .arrow { transform: rotate(90deg); justify-self: center; }
+}
+
+/* ---------- 表單 ---------- */
+input[type="text"], input[type="url"], input[type="number"], input[type="password"], textarea, select {
+  border: 1px solid var(--border-strong); background: var(--panel); border-radius: 8px; padding: 7px 10px; outline: none;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 1px;
+}
+textarea { width: 100%; resize: vertical; min-height: 140px; line-height: 1.6; display: block; }
+.neg { margin-top: 12px; }
+.neg .card-h h2 { font-size: 13.5px; }
+.neg textarea { min-height: 58px; }
+.btn {
+  border: 1px solid var(--border-strong); background: var(--panel); border-radius: 8px; padding: 6px 12px;
+  white-space: nowrap; font-size: 13px;
+}
+.btn:hover { background: var(--panel-2); }
+.btn.small { padding: 3px 9px; font-size: 12.5px; }
+.btn.danger:hover { color: var(--err); border-color: var(--err); }
+.primary {
+  border: 0; background: var(--accent); color: var(--accent-text); border-radius: 10px;
+  padding: 11px 26px; font-size: 15px; font-weight: 650;
+}
+.primary:hover { background: var(--accent-hover); }
+.primary:disabled { opacity: .45; cursor: not-allowed; }
+.link-btn { border: 0; background: none; color: var(--accent); padding: 0; font-size: 13px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+.chips .hint { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.chip-btn { border: 1px solid var(--border-strong); background: var(--panel-2); border-radius: 6px; padding: 1px 8px; font-size: 12.5px; }
+.chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.params { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px 12px; align-items: center; }
+.params .label { color: var(--muted); font-size: 13px; }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); }
+.seg button { border: 0; background: none; padding: 4px 11px; border-radius: 7px; font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border-strong); }
+.seg button:disabled { opacity: .35; cursor: not-allowed; }
+.ratio-icon { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; }
+.dur { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dur input[type="range"] { flex: 1; min-width: 140px; accent-color: var(--accent); }
+.dur input[type="number"] { width: 64px; }
+.dur.auto input[type="range"], .dur.auto input[type="number"] { opacity: .4; }
+.toggles { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.check input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.seed { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.seed input { width: 150px; }
+.meter, .param-note { grid-column: 2; font-size: 12.5px; color: var(--muted); }
+.meter .bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; margin-top: 4px; border: 1px solid var(--border); }
+.meter .bar i { display: block; height: 100%; background: var(--accent); }
+.meter.over { color: var(--err); }
+.meter.over .bar i { background: var(--err); }
+.presets { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); }
+@media (max-width: 560px) {
+  .params { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .meter, .param-note, .presets { grid-column: 1; }
+}
+
+.issues { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.issues:empty { display: none; }
+.issues li { padding: 7px 10px; border-radius: 8px; font-size: 13px; }
+.issues li.error { background: var(--err-weak); color: var(--err); }
+.issues li.warn { background: var(--warn-weak); color: var(--warn); }
+.issues li.info { background: var(--panel-2); color: var(--muted); }
+.submit-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kbd { font-size: 12px; color: var(--faint); }
+.submit-row .link-btn { margin-left: auto; }
+pre.preview {
+  margin: 12px 0 0; padding: 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto;
+}
+
+/* ---------- 任務 ---------- */
+.tasks-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.tasks-h h2 { font-size: 16px; }
+.import { display: flex; gap: 6px; }
+.import input { width: 220px; max-width: 50vw; padding: 5px 9px; font-size: 13px; }
+.task-list { display: flex; flex-direction: column; gap: 12px; }
+.task { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); min-width: 0; }
+.task-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+.badge.queued { background: var(--panel-2); color: var(--muted); }
+.badge.running { background: var(--run-weak); color: var(--run); }
+.badge.success { background: var(--ok-weak); color: var(--ok); }
+.badge.failure { background: var(--err-weak); color: var(--err); }
+.task-top .time { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.task-bar { height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; margin-top: 10px; }
+.task-bar i { display: block; height: 100%; background: var(--run); transition: width .4s; }
+.task-bar.indeterminate i { width: 30% !important; animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.task-prompt {
+  margin: 10px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13.5px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer;
+}
+.task-prompt.open { display: block; }
+.task-prompt.none { color: var(--faint); cursor: default; }
+.task-neg { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.meta-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.meta-chips span { font-size: 12px; padding: 1px 8px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
+.task-media { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.task-media .mini { position: relative; width: 44px; height: 44px; border-radius: 6px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--border); display: grid; place-items: center; font-size: 11px; color: var(--muted); }
+.task-media .mini img { width: 100%; height: 100%; object-fit: cover; }
+.task-media .mini b { position: absolute; left: 0; bottom: 0; font-size: 10px; padding: 0 4px; background: rgba(0, 0, 0, .6); color: #fff; border-top-right-radius: 4px; font-weight: 500; white-space: nowrap; }
+.task video { width: 100%; max-height: 420px; border-radius: 8px; background: #000; margin-top: 10px; display: block; }
+.task .err { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--err-weak); color: var(--err); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.task .soft { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.task-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+.task-actions .id { margin-left: auto; font: 11px ui-monospace, Menlo, monospace; color: var(--faint); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { color: var(--muted); text-align: center; padding: 40px 12px; border: 1.5px dashed var(--border-strong); border-radius: var(--radius); }
+
+/* ---------- 圖片模式 ---------- */
+.checker { background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--panel) 0 50%) 0 0 / 16px 16px; }  /* 透明背景看得出來 */
+.size-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.size-row input[type="number"] { width: 84px; }
+.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 10px; }
+.img-grid button { display: block; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; aspect-ratio: 1; cursor: zoom-in; }
+.img-grid button:hover { border-color: var(--accent); }
+.img-grid img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.img-grid.single { grid-template-columns: minmax(0, 1fr); }
+.img-grid.single button { aspect-ratio: auto; }
+.img-grid.single img { height: auto; max-height: 420px; }
+dialog.viewer { width: min(1000px, calc(100vw - 32px)); padding: 14px; }
+.viewer-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.viewer-top b { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; }
+.viewer-top .x-btn { position: static; flex: none; }
+.viewer-stage { position: relative; display: grid; place-items: center; border-radius: 10px; overflow: hidden; min-height: 160px; }
+.viewer-stage img { max-width: 100%; max-height: min(66vh, 900px); display: block; }
+.viewer-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(0, 0, 0, .5); color: #fff; font-size: 20px; line-height: 1; }
+.viewer-nav:hover { background: rgba(0, 0, 0, .75); }
+.viewer-nav.prev { left: 8px; }
+.viewer-nav.next { right: 8px; }
+.viewer-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; }
+.viewer-actions .sep { flex: 1; }
+
+/* ---------- 對話框、提示 ---------- */
+dialog { border: 1px solid var(--border); border-radius: 14px; padding: 20px; background: var(--panel); color: var(--text); width: min(440px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgba(0, 0, 0, .25); }
+dialog::backdrop { background: rgba(10, 10, 20, .45); }
+dialog h2 { font-size: 16px; margin-bottom: 6px; }
+dialog p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+dialog input[type="password"] { width: 100%; }
+dialog .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+dialog .dlg-err { color: var(--err); font-size: 13px; margin-top: 8px; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: min(420px, calc(100vw - 32px)); }
+.toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); animation: pop .18s ease-out; white-space: pre-wrap; word-break: break-word; }
+.toast.error { background: var(--err); color: #fff; }
+@keyframes pop { from { transform: translateY(6px); opacity: 0; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+      <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a4ee6"/><stop offset="1" stop-color="#b04fe6"/></linearGradient></defs>
+      <rect x="2" y="2" width="60" height="60" rx="13.5" fill="url(#logoGrad)"/>
+      <path d="M25.5 20.4L25.5 43.6L45.7 32Z" fill="#fff" stroke="#fff" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M47.9 10.4Q48.8 15.2 53.6 16.1Q48.8 17 47.9 21.8Q47 17 42.2 16.1Q47 15.2 47.9 10.4Z" fill="#fff"/>
+    </svg>
+    <div><h1 id="brandTitle">影片生成</h1><p id="brandSub"></p></div>
+  </div>
+  <div class="top-actions">
+    <div class="switch" id="kindSwitch" hidden><span>生成</span>
+      <div class="seg" id="kindSeg" role="group" aria-label="生成影片或圖片">
+        <button type="button" data-kind="video" aria-pressed="true">影片</button>
+        <button type="button" data-kind="image" aria-pressed="false">圖片</button>
+      </div>
+    </div>
+    <div class="switch"><span>API</span>
+      <div class="seg" id="providerSeg" role="group" aria-label="API 供應商">
+        <button type="button" data-provider="mixroute" aria-pressed="true">MixRoute</button>
+        <button type="button" data-provider="gmi" aria-pressed="false">GMI Cloud</button>
+      </div>
+    </div>
+    <label class="switch"><span>模型</span><select id="modelSelect" aria-label="模型"></select></label>
+    <button id="keyPill" class="pill" type="button">API key：檢查中…</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="composer" aria-label="建立任務">
+    <div class="card" id="modeCard">
+      <div class="modes" role="tablist" aria-label="生成模式">
+        <button class="mode-btn" role="tab" data-mode="ref" type="button"><b>參考生成</b><small>文字、參考圖／影片／音訊<span id="modeDocs">、文件或網頁</span></small></button>
+        <button class="mode-btn" role="tab" data-mode="frame" type="button"><b>首尾幀</b><small>首幀，或首幀＋尾幀（不能和參考素材混用）</small></button>
+      </div>
+    </div>
+
+    <div id="refPanel" class="stack">
+      <div class="notice">
+        <span aria-hidden="true">ⓘ</span>
+        <span data-only="mixroute">本機圖片直接轉 base64 送出。本機影片、音訊、文件會上傳到 Litterbox 臨時空間取得公開連結，保存
+          <select id="ttl" aria-label="臨時連結保存時間">
+            <option value="1h">1 小時</option><option value="12h">12 小時</option><option value="24h">24 小時</option><option value="72h">72 小時</option>
+          </select>，期間拿到連結的人都能下載。</span>
+        <span data-only="gmi" hidden>GMI 只收公開網址：本機圖片、影片、音訊會在送出時上傳到 GMI 的儲存空間（不經第三方，但拿到連結的人都能下載）。GMI 不支援文件或網頁素材。</span>
+        <span data-kind-only="image" hidden>沒有參考圖時是文字生圖；有參考圖時照提示詞修改，或把多張參考圖合成一張。本機圖片會在送出時上傳到 GMI 的儲存空間（不經第三方，但拿到連結的人都能下載）。</span>
+      </div>
+
+      <section class="card" data-drop="image">
+        <div class="card-h">
+          <h2>參考圖片 <span class="count" id="count-image"></span></h2>
+          <label class="check" title="轉成 JPEG、長邊縮到 2048px 以內，送出比較快。關掉則盡量送原圖（有透明背景或超出限制時仍會轉檔）。">
+            <input type="checkbox" id="optimize"> 自動最佳化
+          </label>
+        </div>
+        <p class="desc" id="desc-image"></p>
+        <div class="thumbs" id="list-image"></div>
+        <div class="url-row"><input type="url" placeholder="或貼上圖片網址 https://…" data-url="image" aria-label="圖片網址"><button class="btn" type="button" data-add-url="image">加入</button></div>
+      </section>
+
+      <section class="card" data-drop="video">
+        <div class="card-h"><h2>參考影片 <span class="count" id="count-video"></span></h2></div>
+        <p class="desc" id="desc-video"></p>
+        <div class="rows" id="list-video"></div>
+        <div class="url-row"><input type="url" placeholder="或貼上影片網址 https://…" data-url="video" aria-label="影片網址"><button class="btn" type="button" data-add-url="video">加入</button></div>
+      </section>
+
+      <section class="card" data-drop="audio">
+        <div class="card-h"><h2>參考音訊 <span class="count" id="count-audio"></span></h2></div>
+        <p class="desc" id="desc-audio"></p>
+        <div class="rows" id="list-audio"></div>
+        <div class="url-row"><input type="url" placeholder="或貼上音訊網址 https://…" data-url="audio" aria-label="音訊網址"><button class="btn" type="button" data-add-url="audio">加入</button></div>
+      </section>
+
+      <section class="card" data-drop="file" id="docCard">
+        <div class="card-h"><h2>文件或網頁 <span class="count">擇一</span></h2></div>
+        <p class="desc">文件：pdf、pptx、xlsx、txt、md、key 等，≤ 100 MB、≤ 50 頁（.doc／.docx 請轉 PDF 或貼網址）。網頁：不需登入的公開頁面。</p>
+        <div class="rows" id="list-doc"></div>
+        <div class="url-row">
+          <select id="docKind" aria-label="網址類型"><option value="link">網頁網址</option><option value="file">文件網址</option></select>
+          <input type="url" placeholder="https://…" data-url="doc" aria-label="文件或網頁網址"><button class="btn" type="button" data-add-url="doc">加入</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="framePanel" class="card" hidden>
+      <div class="frames">
+        <div class="frame-slot" data-drop="first">
+          <h3>首幀<small>必填</small></h3>
+          <div class="frame-box" id="box-first"></div>
+          <div class="url-row"><input type="url" placeholder="或貼上圖片網址" data-url="first" aria-label="首幀網址"><button class="btn" type="button" data-add-url="first">加入</button></div>
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="frame-slot" data-drop="last">
+          <h3>尾幀<small>選填</small></h3>
+          <div class="frame-box" id="box-last"></div>
+          <div class="url-row"><input type="url" placeholder="或貼上圖片網址" data-url="last" aria-label="尾幀網址"><button class="btn" type="button" data-add-url="last">加入</button></div>
+        </div>
+      </div>
+      <p class="desc" id="frameNote" hidden style="margin:12px 0 0"></p>
+    </div>
+
+    <section class="card">
+      <div class="card-h"><h2>提示詞</h2><span class="count" id="promptCount"></span></div>
+      <div class="chips" id="labelChips"></div>
+      <textarea id="prompt" placeholder="描述畫面、動作、鏡頭與氛圍。例：图1的女生穿著图2的洋裝，走進图3的大廳，鏡頭緩慢跟隨…" aria-label="提示詞"></textarea>
+      <div class="neg" id="negBox" hidden>
+        <div class="card-h"><h2>負面提示詞 <span class="count">選填</span></h2><span class="count" id="negCount"></span></div>
+        <textarea id="negPrompt" maxlength="500" placeholder="不想出現的內容。例：模糊、低畫質、變形、多餘的手指" aria-label="負面提示詞"></textarea>
+      </div>
+    </section>
+
+    <section class="card" id="videoParams">
+      <div class="card-h"><h2>參數</h2><button class="link-btn" type="button" id="resetParams">恢復預設</button></div>
+      <div class="params">
+        <span class="label">解析度</span>
+        <div class="seg" id="resSeg"></div>
+        <span class="label">比例</span>
+        <div class="seg" id="ratioSeg"></div>
+        <div class="param-note" id="ratioNote" hidden></div>
+        <span class="label">時長</span>
+        <div class="dur" id="durBox">
+          <input type="range" id="durRange" min="2" max="30" step="1" aria-label="時長（秒）">
+          <span><input type="number" id="durNum" min="2" max="30" step="1" aria-label="時長秒數"> 秒</span>
+          <label class="check" id="durAutoBox"><input type="checkbox" id="durAuto"> 自動（-1）</label>
+        </div>
+        <div class="meter" id="videoMeter" hidden></div>
+        <div class="presets" id="editPresets" hidden>
+          <span>影片編輯／延長：</span>
+          <button class="btn small" type="button" id="presetEdit" title="比例自適應、時長自動，保留原影片構圖">套用編輯設定</button>
+          <button class="btn small" type="button" id="presetExtend" title="比例自適應">套用延長設定</button>
+        </div>
+        <span class="label">選項</span>
+        <div class="toggles">
+          <label class="check"><input type="checkbox" id="optAudio"> 產生音軌<span id="audioAlways" hidden>（一律產生）</span></label>
+          <label class="check" data-opt="prompt_extend"><input type="checkbox" id="optExtend"> 提示詞自動擴寫</label>
+          <label class="check" data-opt="watermark"><input type="checkbox" id="optWatermark"> AI 浮水印</label>
+          <label class="check" data-opt="web_search" title="生成前讓模型上網搜尋提示詞提到的人事物（web_search）"><input type="checkbox" id="optWebSearch"> 聯網搜尋</label>
+        </div>
+        <span class="label" id="seedLabel">Seed</span>
+        <div class="seed" id="seedBox">
+          <input type="number" id="seed" placeholder="留空＝隨機" min="-1" max="2147483647" aria-label="Seed">
+          <button class="btn small" type="button" id="seedDice">隨機產生</button>
+          <button class="btn small" type="button" id="seedClear">清除</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="imageParams" hidden>
+      <div class="card-h"><h2>參數</h2><button class="link-btn" type="button" id="resetImageParams">恢復預設</button></div>
+      <div class="params">
+        <span class="label">比例</span>
+        <div class="seg" id="imgRatioSeg"></div>
+        <span class="label">尺寸</span>
+        <div>
+          <div class="seg" id="imgTierSeg"></div>
+          <div class="size-row" id="imgCustom" hidden>
+            <input type="number" id="imgW" min="16" max="3840" step="16" aria-label="寬（px）"> ×
+            <input type="number" id="imgH" min="16" max="3840" step="16" aria-label="高（px）"> px
+          </div>
+        </div>
+        <div class="param-note" id="imgSizeNote"></div>
+        <span class="label">品質</span>
+        <div class="seg" id="imgQualitySeg"></div>
+        <div class="param-note" id="imgQualityNote"></div>
+        <span class="label">張數</span>
+        <div class="dur">
+          <input type="range" id="imgNRange" min="1" max="10" step="1" aria-label="一次生成幾張">
+          <span><input type="number" id="imgNNum" min="1" max="10" step="1" aria-label="張數"> 張</span>
+        </div>
+        <span class="label">格式</span>
+        <div class="size-row">
+          <div class="seg" id="imgFormatSeg"></div>
+          <span id="imgCompressionBox" title="output_compression：100 最清晰、檔案最大">壓縮品質 <input type="number" id="imgCompression" min="0" max="100" step="1" style="width:64px" aria-label="壓縮品質（0–100）"></span>
+        </div>
+        <span class="label" id="imgBgLabel">背景</span>
+        <div class="seg" id="imgBgSeg"></div>
+        <span class="label" id="imgOptLabel">選項</span>
+        <div class="toggles" id="imgOptBox">
+          <label class="check" title="moderation: low：內容審核比較寬鬆，被擋下來的機會比較小"><input type="checkbox" id="imgModLow"> 寬鬆審核</label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <ul class="issues" id="issues"></ul>
+      <div class="submit-row">
+        <button class="primary" type="button" id="submitBtn">生成影片</button>
+        <span class="kbd">⌘ / Ctrl + Enter</span>
+        <button class="link-btn" type="button" id="previewBtn">預覽請求 JSON</button>
+      </div>
+      <pre class="preview" id="previewBox" hidden></pre>
+    </section>
+  </section>
+
+  <section class="tasks" aria-label="任務">
+    <div class="tasks-h">
+      <h2>任務</h2>
+      <form class="import" id="importForm">
+        <input type="text" id="importId" placeholder="用 task_id 查詢既有任務" aria-label="task_id">
+        <button class="btn small" type="submit">查詢</button>
+      </form>
+    </div>
+    <div class="task-list" id="taskList"></div>
+    <p class="empty" id="taskEmpty" hidden>還沒有任務。左邊填好後按「生成」，完成的影片和圖片會自動存到 outputs/。</p>
+  </section>
+</main>
+
+<dialog id="keyDialog">
+  <form method="dialog" id="keyForm">
+    <h2 id="keyTitle">MixRoute API key</h2>
+    <p id="keyDesc">key 只會傳給本機的 video_ui.py，放在記憶體裡；也可以改用環境變數 MIXROUTE_API_KEY 啟動。</p>
+    <input type="password" id="keyInput" placeholder="sk-…" autocomplete="off" aria-label="API key">
+    <label class="check" style="margin-top:10px"><input type="checkbox" id="keyRemember"> 記在這個瀏覽器（下次自動帶入）</label>
+    <div class="dlg-err" id="keyErr" hidden></div>
+    <div class="dlg-actions">
+      <button class="btn" type="button" id="keyCancel">取消</button>
+      <button class="primary" type="submit" id="keySave" style="padding:8px 18px;font-size:14px">儲存</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="viewer" class="viewer" aria-label="生成的圖片">
+  <div class="viewer-top"><b id="viewerTitle"></b><button class="x-btn" type="button" id="viewerClose" aria-label="關閉" title="關閉（Esc）">×</button></div>
+  <div class="viewer-stage checker">
+    <img id="viewerImg" alt="">
+    <button class="viewer-nav prev" type="button" id="viewerPrev" aria-label="上一張" title="上一張（←）">‹</button>
+    <button class="viewer-nav next" type="button" id="viewerNext" aria-label="下一張" title="下一張（→）">›</button>
+  </div>
+  <div class="viewer-actions">
+    <button class="btn small" type="button" data-use="edit" title="切到圖片模式，加進參考圖，照提示詞繼續修改">繼續編輯這張</button>
+    <button class="btn small" type="button" data-use="image" title="切到影片的「參考生成」，加進參考圖片">當影片參考圖</button>
+    <button class="btn small" type="button" data-use="first" title="切到影片的「首尾幀」，放在首幀">當影片首幀</button>
+    <button class="btn small" type="button" data-use="last" title="切到影片的「首尾幀」，放在尾幀">當影片尾幀</button>
+    <span class="sep"></span>
+    <button class="btn small" type="button" id="viewerReveal">顯示檔案</button>
+    <a class="btn small" id="viewerOpen" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">開新分頁</a>
+  </div>
+</dialog>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<input type="file" id="filePicker" hidden multiple>
+
+<!-- 各 API × 模型的參數與素材限制：video_ui.py 送出網頁時把 video_models.py（影片）和 image_models.py（圖片）的內容填進來 -->
+<script id="catalog" type="application/json">__CATALOG__</script>
+<script id="imageCatalog" type="application/json">__IMAGE_CATALOG__</script>
+<script>
+'use strict';
+
+// ---------- 常數 ----------
+const API_TYPE = { image: 'reference_image', video: 'reference_video', audio: 'reference_audio', file: 'file', link: 'link', first: 'first_frame', last: 'last_frame' };
+const SLOT_OF = Object.fromEntries(Object.entries(API_TYPE).map(([k, v]) => [v, k]));
+const SLOT_NAME = { image: '參考圖片', video: '參考影片', audio: '參考音訊', file: '文件', link: '網頁', first: '首幀', last: '尾幀' };
+const REF_SLOTS = ['image', 'video', 'audio', 'file', 'link'];
+const FRAME_SLOTS = ['first', 'last'];
+const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'heic', 'heif', 'avif', 'tif', 'tiff'];
+const VIDEO_EXT = ['mp4', 'mov'];
+const AUDIO_EXT = ['wav', 'mp3'];
+const DOC_EXT = ['pdf', 'pptx', 'ppt', 'xlsx', 'xls', 'txt', 'md', 'key', 'pages', 'numbers'];
+const FAILED = new Set(['FAILURE', 'FAILED', 'EXPIRED', 'CANCELED', 'CANCELLED', 'UNKNOWN']);
+const MB = 1 << 20;
+// 各模型共用的參數：換模型時沿用，模型不支援的值（例如 Seedance 沒有 1080P）只在送出時換成可用的值，這裡不會被改掉。
+// 「產生音軌」各模型的預設不同，另外記在 state.audio
+const DEFAULT_PARAMS = { resolution: '480P', ratio: '16:9', duration: 2, auto: false, prompt_extend: false, watermark: false, web_search: false, seed: '' };
+const RATIO_LABEL = { adaptive: '自適應' };
+const TTLS = ['1h', '12h', '24h', '72h'];
+// localStorage 的名稱（這裡和下面的 keyStore）沿用改名前的 wanui.*，瀏覽器裡已存的草稿和 key 才不會不見
+const STORE_KEY = 'wanui.state.v1';
+// 右上角可切換的 API；各 API 有哪些模型、每個模型的參數和素材限制在 CATALOG
+const PROVIDERS = {
+  mixroute: { label: 'MixRoute', env: 'MIXROUTE_API_KEY', keyStore: 'wanui.key', placeholder: 'sk-…' },
+  gmi: { label: 'GMI Cloud', env: 'GMI_API_KEY', keyStore: 'wanui.key.gmi', placeholder: 'eyJ…' },
+};
+const DEFAULT_MODEL = 'wan3.0-video';  // 加入模型切換之前的任務紀錄都是它
+// video_ui.py 送出網頁時把 video_models.py 的 MODELS 填進 #catalog；直接開 HTML 檔或舊版伺服器送的網頁沒有
+const CATALOG = (() => {
+  try {
+    const list = JSON.parse(document.getElementById('catalog').textContent);
+    return Array.isArray(list) && list.length ? list : null;
+  } catch { return null; }
+})();
+// 圖片模式（GMI 的 GPT Image 2.5）：video_ui.py 把 image_models.py 的 MODELS 填進 #imageCatalog；舊版伺服器沒有，就不顯示「圖片」
+const IMAGE_CATALOG = (() => {
+  try {
+    const list = JSON.parse(document.getElementById('imageCatalog').textContent);
+    return Array.isArray(list) && list.length ? list : null;
+  } catch { return null; }
+})();
+// 圖片的參數和影片的分開記：ratio 是比例（ref＝跟 Image 1 一樣、custom＝自訂寬高），tier 是 image_models.py 的解析度
+const DEFAULT_IMAGE_PARAMS = { ratio: '1:1', tier: '1K', width: 1024, height: 1024, quality: 'medium', n: 1, format: 'png', compression: 100, background: 'auto', moderation: 'auto' };
+const QUALITY_LABEL = { low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' };
+const FORMAT_LABEL = { png: 'PNG', jpeg: 'JPEG', webp: 'WebP' };
+const BG_LABEL = { auto: '自動', transparent: '透明', opaque: '不透明' };
+
+// ---------- 小工具 ----------
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : String(c));
+  return el;
+}
+const extOf = name => (String(name).split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+const fmtBytes = n => n >= MB ? (n / MB).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const fmtSec = s => (Math.round(s * 10) / 10) + ' 秒';
+const fmtUsd = v => { const m = Math.round(v * 1000); return '$' + (m / 1000).toFixed(m % 10 ? 3 : 2); };
+const pad = n => String(n).padStart(2, '0');
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m >= 60 ? `${Math.floor(m / 60)}:${pad(m % 60)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+function fmtDate(sec) { const d = new Date(sec * 1000); return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function shortUrl(u) {
+  try { const x = new URL(u); return decodeURIComponent(x.pathname.split('/').filter(Boolean).pop() || x.hostname); } catch { return u; }
+}
+function isHttpUrl(u) { try { return ['http:', 'https:'].includes(new URL(u).protocol); } catch { return false; } }
+function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function toast(msg, kind = '') {
+  const el = h('div', { class: 'toast ' + kind, text: msg, role: kind === 'error' ? 'alert' : 'status' });
+  $('#toasts').append(el);
+  setTimeout(() => el.remove(), kind === 'error' ? 8000 : 4000);
+}
+async function api(path, { method = 'GET', json, body, headers = {} } = {}) {
+  const opts = { method, headers: { 'X-Video-UI': '1', ...headers } };
+  if (json !== undefined) { opts.body = JSON.stringify(json); opts.headers['Content-Type'] = 'application/json'; }
+  else if (body !== undefined) opts.body = body;
+  let res;
+  try { res = await fetch(path, opts); } catch {
+    throw new Error(!/^https?:$/.test(location.protocol)
+      ? '不能直接開 HTML 檔：請雙擊「AI 影片生成」App，或執行 python3 video_ui.py'
+      : '連不到本機伺服器，video_ui.py 還開著嗎？');
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* 不是 JSON */ }
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ---------- 狀態 ----------
+const state = {
+  kind: 'video',      // 生成影片或圖片：提示詞和參考圖片兩邊共用，其他設定各記各的
+  mode: 'ref',
+  provider: 'mixroute',
+  model: DEFAULT_MODEL,
+  lastModel: {},      // 各 API 上次用的模型：切到別的 API 再切回來時還原
+  imageModel: IMAGE_CATALOG?.[0].id || '',  // 圖片模型（image_models.py 的 id），只有 GMI 有
+  items: [],          // 所有素材（兩種模式、各模型共用，送出時只取目前模式和模型用得到的）
+  prompt: '',
+  negative: '',       // 負面提示詞，只有支援的模型會送出
+  params: { ...DEFAULT_PARAMS },
+  imageParams: { ...DEFAULT_IMAGE_PARAMS },
+  audio: {},          // 各模型的「產生音軌」：「API/模型」→ true／false，沒設過就用模型的預設
+  optimize: true,
+  ttl: '1h',
+  keys: { mixroute: null, gmi: null },  // 各 API 的 key 來源：env、session 或 null
+  prices: {},         // 「API/模型」→ 解析度 → 每秒價格（美元），目前只有 GMI 有
+  platform: '',
+};
+let seq = 0;
+let serverOk = false;
+const newId = () => 'm' + Date.now().toString(36) + (seq++).toString(36);
+const isImage = () => state.kind === 'image';
+const curProvider = () => isImage() ? IM().provider : state.provider;  // 圖片模式固定用圖片模型的 API
+const P = () => PROVIDERS[curProvider()];
+const findSpec = (provider, model) => (CATALOG || []).find(m => m.provider === provider && m.id === model);
+const modelsOf = provider => (CATALOG || []).filter(m => m.provider === provider);
+const modelLabel = id => (CATALOG || []).find(m => m.id === id)?.label || id;
+const M = () => findSpec(state.provider, state.model);  // 目前影片模型的參數與素材限制
+const IM = () => (IMAGE_CATALOG || []).find(m => m.id === state.imageModel) || IMAGE_CATALOG?.[0];  // 目前的圖片模型
+const S = () => isImage() ? IM() : M();  // 表單現在用的模型：參考圖片的上限、標籤、檢查都看它
+const imageSpecOf = t => (IMAGE_CATALOG || []).find(m => m.id === t.family || m.generate === t.model || m.edit === t.model);
+const specKey = (s = M()) => s.provider + '/' + s.id;
+const keySource = () => state.keys[curProvider()];
+const limitOf = (slot, s = S()) => s.media[API_TYPE[slot]] || 0;
+const labelOf = (slot, n, s = S()) => s.labels[slot] ? s.labels[slot] + n : SLOT_NAME[slot];
+const audioOn = (s = M()) => s.audio === 'always' || (state.audio[specKey(s)] ?? s.defaults.audio);
+const ratioLocked = (s = M()) => state.mode === 'frame' && s.frame_ratio === 'force';
+// 純文字生影片（參考生成模式、沒有這個模型用得上的素材）不能用自適應比例的模型（MiniMax H3）。
+// 比較 === false：還沒重開的舊伺服器送來的模型清單沒有 text_adaptive
+const adaptiveBlocked = (s = M()) => s.text_adaptive === false && state.mode === 'ref' && !activeItems().length;
+const itemsOf = slot => state.items.filter(it => it.slot === slot);
+const modeSlots = () => isImage() ? ['image'] : state.mode === 'frame' ? FRAME_SLOTS : REF_SLOTS;
+const activeSlots = () => modeSlots().filter(slot => limitOf(slot));
+const activeItems = () => activeSlots().flatMap(itemsOf);
+const alive = it => state.items.includes(it);
+const previewFor = it => it.ref ? '/outputs/inputs/' + it.ref : it.local ? '/outputs/inputs/' + it.local : (it.url || '');
+const isExpired = it => !!(it.local && it.expires_at && it.expires_at * 1000 < Date.now());
+
+// 重新整理頁面後還原：素材只記住伺服器上的副本或網址，不存檔案內容
+// from：從生成的圖片加入的素材記著是哪個檔案，同一張不會重複加入
+const PERSIST = ['id', 'slot', 'name', 'source', 'ref', 'url', 'local', 'expires_at', 'ttl', 'width', 'height', 'duration', 'bytes', 'notes', 'warn', 'from'];
+function saveState() {
+  try {
+    // 自動轉檔中的圖片（fixing）舊的副本還能用，照樣記住
+    const items = state.items.filter(it => it.status === 'ready' || it.fixing)
+      .map(it => Object.fromEntries(PERSIST.filter(k => it[k] !== undefined).map(k => [k, it[k]])));
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      kind: state.kind, mode: state.mode, provider: state.provider, model: state.model, lastModel: state.lastModel,
+      imageModel: state.imageModel, prompt: state.prompt, negative: state.negative, params: state.params,
+      imageParams: state.imageParams, audio: state.audio, optimize: state.optimize, ttl: state.ttl, items,
+    }));
+  } catch { /* 無痕模式等情況存不了，不影響使用 */ }
+}
+let saveTimer;
+function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(saveState, 300); }
+function loadState() {
+  let s;
+  try { s = JSON.parse(safeGet(STORE_KEY) || 'null'); } catch { s = null; }
+  if (s) {
+    if (['video', 'image'].includes(s.kind)) state.kind = s.kind;
+    if (['ref', 'frame'].includes(s.mode)) state.mode = s.mode;
+    if (Object.hasOwn(PROVIDERS, s.provider || '')) state.provider = s.provider;
+    if (typeof s.model === 'string') state.model = s.model;
+    if (s.lastModel && typeof s.lastModel === 'object') state.lastModel = { ...s.lastModel };
+    if (typeof s.imageModel === 'string') state.imageModel = s.imageModel;
+    if (s.imageParams && typeof s.imageParams === 'object') state.imageParams = { ...DEFAULT_IMAGE_PARAMS, ...s.imageParams };
+    if (typeof s.prompt === 'string') state.prompt = s.prompt;
+    if (typeof s.negative === 'string') state.negative = s.negative;
+    state.params = { ...DEFAULT_PARAMS, ...(s.params || {}) };
+    if (s.audio && typeof s.audio === 'object') state.audio = { ...s.audio };
+    // 舊版只有一個 params.audio，是 MixRoute 的開關（GMI 的 Wan 一律有聲）
+    else if (typeof s.params?.audio === 'boolean') state.audio['mixroute/' + DEFAULT_MODEL] = s.params.audio;
+    delete state.params.audio;
+    state.optimize = s.optimize !== false;
+    if (TTLS.includes(s.ttl)) state.ttl = s.ttl;
+    state.items = (Array.isArray(s.items) ? s.items : []).filter(it => API_TYPE[it.slot])
+      .map(it => ({ notes: [], ...it, status: 'ready', preview: previewFor(it) }));
+  }
+  // 記住的模型這個 API 沒有（或已經從清單拿掉）就用這個 API 的第一個
+  if (!M()) state.model = modelsOf(state.provider)[0]?.id || DEFAULT_MODEL;
+  if (IMAGE_CATALOG) state.imageModel = IM().id;
+  else state.kind = 'video';  // 舊版伺服器沒有圖片模型
+}
+
+// ---------- 圖片處理（瀏覽器端，不需要額外套件） ----------
+function sniffImage(b) {
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'png';
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'webp';
+  if (b[0] === 0x42 && b[1] === 0x4D) return 'bmp';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'gif';
+  return null;
+}
+function pngHasAlpha(b) {
+  if (b[25] === 4 || b[25] === 6) return true;  // IHDR 色彩類型：灰階＋alpha、RGBA
+  for (let p = 8; p + 8 <= b.length;) {
+    const len = ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]) >>> 0;
+    const type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+    if (type === 'tRNS') return true;
+    if (type === 'IDAT' || type === 'IEND') break;
+    p += 12 + len;
+  }
+  return false;
+}
+function webpHasAlpha(b) {
+  const fourcc = String.fromCharCode(b[12], b[13], b[14], b[15]);
+  if (fourcc === 'VP8X') return (b[20] & 0x10) !== 0;
+  if (fourcc === 'VP8L') return (b[24] & 0x10) !== 0;
+  return false;
+}
+// 本機圖片一加入就轉成每個模型都能用的樣子，之後切換模型不用重新加入：取所有模型限制的交集
+// （GMI 只收 JPEG／PNG、Seedance 每邊 300–6000 px、Wan 不能有透明…）。
+// 長寬比沒辦法靠縮放修正，只擋掉所有模型都不收的，其餘到了不收的模型時在素材上提示。
+// 圖片模型（GPT Image）沒有限制參考圖的尺寸和長寬比，規則裡沒寫的就不算限制
+function imageRules() {
+  const rules = [...(CATALOG || []), ...(IMAGE_CATALOG || [])].map(s => s.image);
+  const minSide = Math.max(240, ...rules.map(r => r.min_side || 0));
+  const maxSide = Math.min(8000, ...rules.map(r => r.max_side || 8000));
+  return {
+    formats: rules.reduce((acc, r) => acc.filter(f => r.formats.includes(f)), ['jpg', 'png', 'webp', 'bmp']),
+    minSide, maxSide,
+    maxBytes: Math.min(20, ...rules.map(r => r.max_mb || 20)) * MB,
+    // 太長的圖放大到最短邊夠長時，長邊會超過上限，所以不能超過 maxSide / minSide
+    maxRatio: Math.min(maxSide / minSide, Math.max(1, ...rules.map(r => r.max_ratio || Infinity))),
+  };
+}
+async function processImage(file, optimize) {
+  const R = imageRules();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const kind = sniffImage(bytes);
+  let bmp;
+  try { bmp = await createImageBitmap(file); }
+  catch { throw new Error(kind ? '瀏覽器無法解碼這張圖片' : '無法讀取這個格式，HEIC 等請先轉成 JPEG／PNG'); }
+  const w = bmp.width, hgt = bmp.height, long = Math.max(w, hgt), short = Math.min(w, hgt);
+  if (long / short > R.maxRatio) { bmp.close(); throw new Error(`長寬比 ${(long / short).toFixed(1)}:1，超過 ${R.maxRatio}:1 上限`); }
+  const alpha = kind === 'png' ? pngHasAlpha(bytes) : kind === 'webp' ? webpHasAlpha(bytes) : kind === 'gif';
+  const supported = R.formats.includes(kind === 'jpeg' ? 'jpg' : kind);
+  if (!optimize && supported && !alpha && long <= R.maxSide && short >= R.minSide && file.size <= R.maxBytes) {
+    bmp.close();
+    return { blob: file, width: w, height: hgt, notes: [] };
+  }
+  let scale = Math.min(1, (optimize ? 2048 : R.maxSide) / long);
+  if (short * scale < R.minSide) scale = R.minSide / short;
+  const tw = Math.round(w * scale), th = Math.round(hgt * scale);
+  const canvas = h('canvas', { width: tw, height: th });
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';  // 透明背景填白
+  ctx.fillRect(0, 0, tw, th);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, tw, th);
+  bmp.close();
+  let quality = optimize ? 0.92 : 0.95, blob;
+  do {
+    blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    quality -= 0.07;
+  } while (blob && blob.size > R.maxBytes && quality > 0.5);
+  if (!blob) throw new Error('轉檔失敗');
+  const notes = [];
+  if (alpha) notes.push('透明背景已填成白色');
+  if (scale < 1) notes.push(`已縮小為 ${tw}×${th}`);
+  if (scale > 1) notes.push(`已放大為 ${tw}×${th}（最短邊需 ≥ ${R.minSide}）`);
+  if (!supported) notes.push('已轉成 JPEG');
+  return { blob, width: tw, height: th, notes };
+}
+function probeImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const timer = setTimeout(() => { img.onload = img.onerror = null; reject(new Error('timeout')); }, 20000);
+    img.onload = () => { clearTimeout(timer); resolve({ width: img.naturalWidth, height: img.naturalHeight }); };
+    img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
+    img.referrerPolicy = 'no-referrer';
+    img.src = url;
+  });
+}
+function probeMedia(src, kind) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement(kind === 'video' ? 'video' : 'audio');
+    const finish = (fn, value) => {
+      clearTimeout(timer);
+      el.onloadedmetadata = el.onerror = null;
+      el.removeAttribute('src');
+      el.load();
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error('timeout')), 20000);
+    el.preload = 'metadata';
+    el.muted = true;
+    el.onloadedmetadata = () => {
+      const info = { duration: Number.isFinite(el.duration) ? el.duration : undefined };
+      if (kind === 'video' && el.videoWidth) Object.assign(info, { width: el.videoWidth, height: el.videoHeight });
+      finish(resolve, info);
+    };
+    el.onerror = () => finish(reject, new Error('load error'));
+    el.src = src;
+  });
+}
+// 素材合不合這個模型的限制（長度、尺寸、格式）。畫面每次更新都重算：換模型時跟著變，素材本身不會被移除
+function mediaProblem(it, s = S()) {
+  const clip = s.clip[API_TYPE[it.slot]];
+  if (clip && it.duration != null) {
+    if (it.duration < clip[0] - 0.05) return `長度 ${fmtSec(it.duration)}，${s.label} 每段至少 ${clip[0]} 秒`;
+    if (it.duration > clip[1] + 0.05) return `長度 ${fmtSec(it.duration)}，超過 ${s.label} 單段 ${clip[1]} 秒上限，請先剪短`;
+  }
+  const rule = it.slot === 'video' ? s.video : ['image', 'first', 'last'].includes(it.slot) ? s.image : null;
+  if (rule && it.width && it.height) {
+    const long = Math.max(it.width, it.height), short = Math.min(it.width, it.height), px = it.width * it.height;
+    const size = `${it.width}×${it.height}`;
+    if ((rule.min_side && short < rule.min_side) || (rule.max_side && long > rule.max_side)) return `尺寸 ${size}，${s.label} 需要每邊 ${rule.min_side}–${rule.max_side} px`;
+    if (rule.max_ratio && long / short > rule.max_ratio + 1e-6) return `長寬比 ${(long / short).toFixed(2)}:1，超過 ${s.label} 的 ${rule.max_ratio}:1 上限`;
+    if (rule.min_pixels && px < rule.min_pixels) return `尺寸 ${size}，${s.label} 需要至少 ${rule.min_pixels.toLocaleString()} 像素（約 640×640）`;
+    if (rule.max_pixels && px > rule.max_pixels) return `尺寸 ${size}，超過 ${s.label} 的 ${rule.max_pixels.toLocaleString()} 像素上限`;
+  }
+  if (rule?.max_mb && it.bytes > rule.max_mb * MB) return `檔案 ${fmtBytes(it.bytes)}，超過 ${s.label} 的 ${rule.max_mb} MB 上限`;
+  if (it.ref && !s.image.formats.includes(extOf(it.ref))) {
+    return `${s.label} 只接受 ${s.image.formats.map(f => f === 'jpg' ? 'JPEG' : f.toUpperCase()).join('／')}`;
+  }
+  return '';
+}
+// 沒有任何模型用得上的素材（例如 40 秒的影片）才當成錯誤；只是目前的模型不收的，保留下來、在素材上提示
+const usableAnywhere = it => [...(CATALOG || []), ...(IMAGE_CATALOG || [])].some(s => limitOf(it.slot, s) && !mediaProblem(it, s));
+const clipHint = slot => { const c = M().clip[API_TYPE[slot]]; return c ? `請自行確認每段 ${c[0]}–${c[1]} 秒` : '請自行確認長度'; };
+
+// ---------- 加入／移除素材 ----------
+function addItem(slot, fields) {
+  // 文件和網頁擇一；首幀、尾幀各一張 → 新的取代舊的
+  const replaced = state.items.filter(it =>
+    (slot === 'file' || slot === 'link') ? (it.slot === 'file' || it.slot === 'link') : ((slot === 'first' || slot === 'last') && it.slot === slot));
+  replaced.forEach(it => removeItem(it.id, true));
+  const it = { id: newId(), slot, status: 'ready', notes: [], ...fields };
+  state.items.push(it);
+  renderMedia();
+  saveSoon();
+  return it;
+}
+function patch(it, fields) {
+  if (!alive(it)) return;  // 處理途中被移除了
+  Object.assign(it, fields);
+  renderMedia();
+  saveSoon();
+}
+function removeItem(id, quiet) {
+  const it = state.items.find(x => x.id === id);
+  if (!it) return;
+  state.items = state.items.filter(x => x !== it);
+  if (it.blobUrl) URL.revokeObjectURL(it.blobUrl);
+  if (!quiet) { renderMedia(); saveSoon(); }
+}
+function roomFor(slot, name) {
+  const limit = limitOf(slot);
+  if (itemsOf(slot).length < limit) return true;
+  toast(`${S().label} 的${SLOT_NAME[slot]}最多 ${limit} 個，略過 ${name}`, 'error');
+  return false;
+}
+// 哪個 API 的哪個模型才能用文件或網頁素材
+function docsHint() {
+  const s = (CATALOG || []).find(m => m.media.file || m.media.link);
+  return s ? `（切到 ${PROVIDERS[s.provider].label} 的 ${s.label} 才能用）` : '';
+}
+
+function addFiles(files, target) {
+  for (const file of files) {
+    const ext = extOf(file.name), type = file.type || '';
+    const imageFile = type.startsWith('image/') || IMAGE_EXT.includes(ext);
+    if (isImage()) {
+      if (!imageFile) { toast(`生成圖片時只能加入參考圖；影片、音訊請切到「影片」再加入：${file.name}`, 'error'); continue; }
+      if (roomFor('image', file.name)) addLocalImage(file, 'image');
+    } else if (state.mode === 'frame') {
+      if (!imageFile) { toast(`首尾幀模式只能放圖片：${file.name}`, 'error'); continue; }
+      const slot = FRAME_SLOTS.includes(target) ? target : FRAME_SLOTS.find(s => !itemsOf(s).length);
+      if (!slot) { toast('首幀和尾幀都已經有圖片了，拖到要換的那一格即可取代', 'error'); continue; }
+      addLocalImage(file, slot);
+    } else if (imageFile) {
+      if (roomFor('image', file.name)) addLocalImage(file, 'image');
+    } else if (type.startsWith('video/') || VIDEO_EXT.includes(ext)) {
+      if (roomFor('video', file.name)) addLocalUpload(file, 'video');
+    } else if (type.startsWith('audio/') || AUDIO_EXT.includes(ext)) {
+      if (roomFor('audio', file.name)) addLocalUpload(file, 'audio');
+    } else if (DOC_EXT.includes(ext) || ext === 'doc' || ext === 'docx') {
+      if (limitOf('file')) addLocalUpload(file, 'file');
+      else toast(`${M().label}（${P().label}）不支援文件素材，略過 ${file.name}${docsHint()}`, 'error');
+    } else {
+      toast(`不支援的檔案：${file.name}`, 'error');
+    }
+  }
+}
+
+async function addLocalImage(file, slot, extra = {}) {
+  const blobUrl = URL.createObjectURL(file);
+  const it = addItem(slot, { name: file.name, source: 'local', status: 'processing', blobUrl, ...extra });
+  try {
+    const r = await processImage(file, state.optimize);
+    if (!alive(it)) return;
+    const res = await api('/api/images', {
+      method: 'POST', body: r.blob,
+      headers: { 'Content-Type': r.blob.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) },
+    });
+    const ready = { status: 'ready', ref: res.ref, bytes: res.bytes, width: r.width, height: r.height, notes: r.notes };
+    patch(it, { ...ready, preview: previewFor(ready) });
+  } catch (e) {
+    patch(it, { status: 'error', error: e.message });
+  }
+}
+
+async function addLocalUpload(file, slot) {
+  const ext = extOf(file.name);
+  const [exts, maxMb] = { video: [VIDEO_EXT, 100], audio: [AUDIO_EXT, 15], file: [DOC_EXT, 100] }[slot];
+  if (slot === 'file' && (ext === 'doc' || ext === 'docx')) {
+    return toast(`${file.name}：Litterbox 不接受 .doc／.docx，請先轉成 PDF，或改貼文件網址`, 'error');
+  }
+  if (!exts.includes(ext)) return toast(`${file.name}：只接受 ${exts.join('、')} 檔`, 'error');
+  if (file.size > maxMb * MB) return toast(`${file.name}：${fmtBytes(file.size)}，超過 ${maxMb} MB 上限`, 'error');
+  const provider = state.provider;  // GMI：先存在本機，送出時才上傳到 GMI
+  const blobUrl = slot === 'file' ? undefined : URL.createObjectURL(file);
+  const it = addItem(slot, { name: file.name, source: 'local', status: 'uploading', bytes: file.size, blobUrl, via: provider === 'gmi' ? '' : 'Litterbox' });
+  let defer = false;
+  if (blobUrl) {
+    // 先檢查長度：沒有模型能用就不用白傳；目前的模型用不到（例如 20 秒的影片只有 Seedance 能用）就先只存在本機
+    try {
+      Object.assign(it, await probeMedia(blobUrl, slot));
+      if (it.duration == null) it.warn = '讀不到長度，' + clipHint(slot);
+    } catch {
+      it.warn = '瀏覽器讀不到這個檔案的長度，' + clipHint(slot);
+    }
+    if (!usableAnywhere(it)) return patch(it, { status: 'error', error: mediaProblem(it) || '沒有模型能用這個檔案' });
+    if (!alive(it)) return;
+    defer = !!mediaProblem(it);
+    if (defer) it.via = '';
+    renderMedia();
+  }
+  try {
+    const res = await api('/api/upload', {
+      method: 'POST', body: file,
+      headers: { 'Content-Type': 'application/octet-stream', 'X-Kind': slot, 'X-Filename': encodeURIComponent(file.name), 'X-TTL': state.ttl, 'X-Provider': provider, 'X-Defer': defer ? '1' : '0' },
+    });
+    patch(it, { status: 'ready', url: res.url, local: res.local, expires_at: res.expires_at, ttl: res.ttl, preview: previewFor(res) });
+  } catch (e) {
+    patch(it, { status: 'error', error: '上傳失敗：' + e.message });
+  }
+}
+
+async function addUrl(slot, raw) {
+  const url = raw.trim();
+  if (!isHttpUrl(url)) { toast('請輸入 http:// 或 https:// 開頭的網址', 'error'); return false; }
+  if (slot === 'doc') slot = $('#docKind').value;
+  if (['image', 'video', 'audio'].includes(slot) && !roomFor(slot, shortUrl(url))) return false;
+  const probing = ['image', 'first', 'last', 'video', 'audio'].includes(slot);
+  const it = addItem(slot, { name: slot === 'link' ? url : shortUrl(url), source: 'url', url, preview: url, status: probing ? 'processing' : 'ready' });
+  if (slot === 'file' && ![...DOC_EXT, 'doc', 'docx'].includes(extOf(url))) {
+    patch(it, { warn: '網址看起來不是支援的文件格式，仍可送出' });
+  }
+  if (!probing) return true;
+  const media = ['video', 'audio'].includes(slot);
+  try {
+    const info = media ? await probeMedia(url, slot) : await probeImage(url);
+    if (!alive(it)) return true;
+    Object.assign(it, info);
+    patch(it, !usableAnywhere(it) ? { status: 'error', error: mediaProblem(it) || '沒有模型能用這個素材' }
+      : { status: 'ready', warn: it.duration == null && media ? '讀不到長度，' + clipHint(slot) : undefined });
+  } catch {
+    patch(it, { status: 'ready', warn: '瀏覽器無法預覽這個網址，仍可送出；請確認是公開的直連檔案' + (media ? '，' + clipHint(slot) : '') });
+  }
+  return true;
+}
+
+// 之前加入、不是每個模型都能用的本機圖片（例如關掉「自動最佳化」時留下的 WebP、太小的圖）自動重新轉檔，
+// 不用移除再拖進來。網址素材沒辦法改，不合的會在素材上提示
+async function fixImages() {
+  const R = imageRules();
+  const needsFix = it => {
+    if (!it.ref || it.status !== 'ready' || it.fixing) return false;
+    const long = Math.max(it.width || 0, it.height || 0), short = Math.min(it.width || 0, it.height || 0);
+    return !R.formats.includes(extOf(it.ref)) || (short > 0 && (short < R.minSide || long > R.maxSide)) || it.bytes > R.maxBytes;
+  };
+  for (const it of state.items.filter(needsFix)) {
+    it.fixing = true;
+    patch(it, { status: 'processing' });
+    try {
+      const res = await fetch('/outputs/inputs/' + it.ref);
+      if (!res.ok) throw new Error('找不到伺服器上的副本，請重新加入');
+      const r = await processImage(await res.blob(), state.optimize);
+      if (!alive(it)) continue;
+      const up = await api('/api/images', { method: 'POST', body: r.blob, headers: { 'Content-Type': r.blob.type || 'application/octet-stream' } });
+      const ready = { status: 'ready', ref: up.ref, bytes: up.bytes, width: r.width, height: r.height, notes: [...(it.notes || []), ...r.notes] };
+      patch(it, { ...ready, preview: previewFor(ready) });
+    } catch (e) {
+      patch(it, { status: 'error', error: '自動轉檔失敗：' + e.message });
+    } finally {
+      it.fixing = false;
+    }
+  }
+}
+
+// ---------- 素材區畫面 ----------
+const nodeCache = new Map();  // 素材 id → { sig, node }，內容沒變就沿用，避免預覽一直重載
+function keyedRender(container, items, build, tail = []) {
+  const key = specKey(S());
+  const nodes = items.map((it, i) => {
+    const sig = JSON.stringify([i, it.status, it.error, it.name, it.blobUrl || it.preview, it.width, it.height,
+      it.duration, it.bytes, it.notes, it.warn, it.url, it.expires_at, isExpired(it), key, mediaProblem(it)]);
+    const cached = nodeCache.get(it.id);
+    if (cached && cached.sig === sig) return cached.node;
+    const node = build(it, i);
+    nodeCache.set(it.id, { sig, node });
+    return node;
+  });
+  const want = [...nodes, ...tail];
+  const have = [...container.children];
+  if (want.length === have.length && want.every((n, i) => n === have[i])) return;
+  container.replaceChildren(...want);
+}
+function itemTitle(it) {
+  return [it.name, it.url && it.source === 'url' ? it.url : '', ...(it.notes || []), it.warn || ''].filter(Boolean).join('\n');
+}
+function removeButton(it) {
+  return h('button', { class: 'x-btn', type: 'button', 'aria-label': '移除 ' + it.name, title: '移除', text: '×', onclick: () => removeItem(it.id) });
+}
+function noteDot(it) {
+  if (it.status !== 'ready' || !(it.notes?.length || it.warn)) return null;
+  return h('span', { class: 'note-dot', title: [...(it.notes || []), it.warn].filter(Boolean).join('\n'), text: it.warn ? '!' : 'i',
+    style: it.warn ? '' : 'background:var(--muted)' });
+}
+function thumbInfo(it) {
+  const parts = [];
+  if (it.width) parts.push(`${it.width}×${it.height}`);
+  if (it.bytes) parts.push(fmtBytes(it.bytes));
+  if (it.source === 'url') parts.push('網址');
+  return parts.join(' · ') || it.name;
+}
+
+let dragId = null;
+function buildThumb(it, idx) {
+  const frame = it.slot === 'first' || it.slot === 'last';
+  const problem = it.status === 'ready' ? mediaProblem(it) : '';
+  const node = h('div', {
+    class: 'thumb' + (it.status === 'error' || problem ? ' error' : ''), 'data-id': it.id, draggable: frame ? null : 'true', title: itemTitle(it),
+  },
+    h('img', { src: it.blobUrl || it.preview, alt: it.name, referrerpolicy: 'no-referrer' }),
+    h('span', { class: 'tag', text: frame ? SLOT_NAME[it.slot] : labelOf('image', idx + 1) }),
+    removeButton(it),
+    it.status === 'ready' && !problem ? h('div', { class: 'info', text: thumbInfo(it) }) : null,
+    problem ? h('div', { class: 'problem', text: problem }) : null,
+    it.status === 'processing' ? h('div', { class: 'state' }, h('span', { class: 'spin', 'aria-label': '處理中' })) : null,
+    it.status === 'error' ? h('div', { class: 'state', text: it.error }) : null,
+    noteDot(it),
+  );
+  if (!frame) enableReorder(node, it);
+  return node;
+}
+function enableReorder(node, it) {
+  const clear = () => $$('.drop-before, .drop-after').forEach(n => n.classList.remove('drop-before', 'drop-after'));
+  const after = e => e.offsetX > node.clientWidth / 2;
+  node.addEventListener('dragstart', e => {
+    dragId = it.id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/x-video-item', it.id);
+    node.classList.add('dragging');
+  });
+  node.addEventListener('dragend', () => { dragId = null; node.classList.remove('dragging'); clear(); });
+  node.addEventListener('dragover', e => {
+    if (!dragId || dragId === it.id) return;
+    e.preventDefault();
+    clear();
+    node.classList.add(after(e) ? 'drop-after' : 'drop-before');
+  });
+  node.addEventListener('dragleave', () => node.classList.remove('drop-before', 'drop-after'));
+  node.addEventListener('drop', e => {
+    if (!dragId || dragId === it.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const moving = state.items.find(x => x.id === dragId);
+    clear();
+    if (!moving) return;
+    state.items = state.items.filter(x => x !== moving);
+    state.items.splice(state.items.indexOf(it) + (after(e) ? 1 : 0), 0, moving);
+    renderMedia();
+    saveSoon();
+  });
+}
+
+function rowSub(it) {
+  if (it.status === 'uploading') return [h('span', { class: 'spin' }), it.via ? ` 上傳到 ${it.via}…` : ' 儲存中…'];
+  if (it.status === 'processing') return [h('span', { class: 'spin' }), ' 讀取中…'];
+  if (it.status === 'error') return [it.error];
+  const parts = [];
+  if (it.duration != null) parts.push(fmtSec(it.duration));
+  if (it.width) parts.push(`${it.width}×${it.height}`);
+  if (it.bytes) parts.push(fmtBytes(it.bytes));
+  if (it.local && state.provider === 'gmi') {
+    parts.push('送出時上傳到 GMI');
+  } else if (it.local && !(it.url && it.expires_at)) {
+    parts.push('送出時上傳到 Litterbox');
+  } else if (it.local) {
+    const until = new Date(it.expires_at * 1000);
+    parts.push(isExpired(it) ? '臨時連結已過期，送出時會自動重傳' : `臨時連結到 ${pad(until.getHours())}:${pad(until.getMinutes())}`);
+  } else if (it.source === 'url') {
+    parts.push(it.slot === 'link' ? '網頁' : '網址');
+  }
+  if (it.warn) parts.push('⚠ ' + it.warn);
+  return [parts.join(' · ')];
+}
+function buildRow(it, idx) {
+  const src = it.blobUrl || it.preview;
+  const problem = it.status === 'ready' ? mediaProblem(it) : '';
+  let media;
+  if (it.slot === 'video' && src) {
+    media = h('video', { class: 'media', src: src + '#t=0.1', preload: 'metadata', muted: true, playsinline: true, title: '點一下播放／暫停' });
+    media.addEventListener('click', () => media.paused ? media.play() : media.pause());
+  } else if (it.slot === 'audio' && src) {
+    media = h('audio', { src, controls: true, preload: 'metadata' });
+  } else {
+    media = h('div', { class: 'icon', text: it.slot === 'link' ? '🔗' : '📄' });
+  }
+  return h('div', { class: 'row' + (it.status === 'error' || problem ? ' error' : ''), 'data-id': it.id },
+    h('span', { class: 'tag', text: labelOf(it.slot, idx + 1) }),
+    media,
+    h('div', { class: 'meta' },
+      h('span', { class: 'name', text: it.name, title: itemTitle(it) }),
+      h('span', { class: 'sub' }, ...(problem ? [problem] : rowSub(it)))),
+    removeButton(it));
+}
+
+let pickerSlot = null;
+function pickFiles(slot) {
+  const input = $('#filePicker');
+  pickerSlot = slot;
+  input.accept = {
+    image: 'image/*', first: 'image/*', last: 'image/*',
+    video: '.mp4,.mov,video/mp4,video/quicktime',
+    audio: '.wav,.mp3,audio/wav,audio/x-wav,audio/mpeg',
+    file: DOC_EXT.map(e => '.' + e).join(','),
+  }[slot];
+  input.multiple = ['image', 'video', 'audio'].includes(slot);
+  input.click();
+}
+function addTile(slot, text) {
+  return h('button', { class: 'add-tile', type: 'button', onclick: () => pickFiles(slot) }, h('span', { class: 'plus', text: '+' }), h('span', { text }));
+}
+const tiles = {
+  image: addTile('image', '拖放、點選或 ⌘V 貼上圖片'),
+  video: addTile('video', '拖放或點選影片檔（MP4／MOV）'),
+  audio: addTile('audio', '拖放或點選音訊檔（WAV／MP3）'),
+  file: addTile('file', '拖放或點選文件'),
+  first: addTile('first', '拖放、點選或 ⌘V 貼上首幀'),
+  last: addTile('last', '拖放、點選或貼上尾幀'),
+};
+
+function renderMedia() {
+  const s = M();
+  const images = itemsOf('image'), videos = itemsOf('video'), audios = itemsOf('audio');
+  const docs = [...itemsOf('file'), ...itemsOf('link')];
+  tiles.image.hidden = images.length >= limitOf('image');
+  tiles.video.hidden = videos.length >= limitOf('video');
+  tiles.audio.hidden = audios.length >= limitOf('audio');
+  keyedRender($('#list-image'), images, buildThumb, [tiles.image]);
+  keyedRender($('#list-video'), videos, buildRow, [tiles.video]);
+  keyedRender($('#list-audio'), audios, buildRow, [tiles.audio]);
+  keyedRender($('#list-doc'), docs, buildRow, docs.length ? [] : [tiles.file]);
+  for (const slot of FRAME_SLOTS) {
+    const list = itemsOf(slot);
+    keyedRender($('#box-' + slot), list, buildThumb, list.length ? [] : [tiles[slot]]);
+  }
+  const total = list => list.reduce((sum, v) => sum + (v.duration || 0), 0);
+  const countEl = $('#count-image');
+  countEl.textContent = `${images.length}/${limitOf('image')}`;
+  countEl.classList.toggle('over', images.length > limitOf('image'));
+  for (const [slot, list] of [['video', videos], ['audio', audios]]) {
+    const el = $('#count-' + slot), sum = total(list), cap = s.clip_sum[API_TYPE[slot]];
+    el.textContent = `${list.length}/${limitOf(slot)}` + (cap ? ` · 合計 ${fmtSec(sum)}／${cap} 秒` : '');
+    el.classList.toggle('over', list.length > limitOf(slot) || (cap && sum > cap + 0.05));
+  }
+  for (const id of [...nodeCache.keys()]) if (!state.items.some(it => it.id === id)) nodeCache.delete(id);
+  renderChips();
+  if (!isImage()) renderParams();  // 有沒有素材會影響比例（MiniMax H3 純文字生影片不能用自適應）
+  renderMeter();
+  renderBrandSub();  // 圖片模式：有沒有參考圖決定用 generate 還是 edit
+  if (isImage()) renderImageParams();  // 「同參考圖」的比例跟著參考圖變
+  renderIssues();
+}
+
+function renderChips() {
+  const box = $('#labelChips');
+  const slots = isImage() ? ['image'] : state.mode === 'ref' ? ['image', 'video', 'audio'] : [];
+  const labels = slots.filter(slot => limitOf(slot)).flatMap(slot => itemsOf(slot).map((_, i) => labelOf(slot, i + 1)));
+  box.hidden = !labels.length;
+  box.replaceChildren(h('span', { class: 'hint', text: '點一下插入：' }),
+    ...labels.map(text => h('button', { class: 'chip-btn', type: 'button', text, onclick: () => insertLabel(text) })));
+}
+function insertLabel(text) {
+  const ta = $('#prompt');
+  ta.setRangeText(text, ta.selectionStart ?? ta.value.length, ta.selectionEnd ?? ta.value.length, 'end');
+  ta.focus();
+  ta.dispatchEvent(new Event('input'));
+}
+
+// ---------- 依模型調整的說明與區塊 ----------
+function renderSpec() {
+  if (isImage()) {
+    const s = IM(), L = s.labels;
+    $('#desc-image').textContent = `最多 ${limitOf('image')} 張，可拖曳調整順序；在提示詞用「${L.image}1」「${L.image}2」指稱。`
+      + '可拖放、點選，或直接 ⌘V 貼上圖片。沒有參考圖時是文字生圖。';
+    for (const slot of ['video', 'audio']) $(`section[data-drop="${slot}"]`).hidden = true;
+    $('section[data-drop="image"]').hidden = false;
+    $('#docCard').hidden = true;
+    $('#negBox').hidden = true;
+    $('#prompt').placeholder = `描述想要的畫面、風格、構圖和圖中的文字。有參考圖時說明要怎麼改，例：把 ${L.image}1 的背景換成下雪的山谷，人物保持不變`;
+    return;
+  }
+  const s = M(), L = s.labels, note = k => s.notes[k] ? s.notes[k] : '';
+  const clip = slot => s.clip[API_TYPE[slot]] || [0, 0], sum = slot => s.clip_sum[API_TYPE[slot]];
+  $('#desc-image').textContent = `最多 ${limitOf('image')} 張，可拖曳調整順序；在提示詞用「${L.image}1」「${L.image}2」指稱。`
+    + `可拖放、點選，或直接 ⌘V 貼上圖片。${note('image')}`;
+  $('#desc-video').textContent = `最多 ${limitOf('video')} 段 MP4／MOV，每段 ${clip('video').join('–')} 秒、合計 ≤ ${sum('video')} 秒、≤ ${s.video.max_mb || 100} MB；`
+    + `用「${L.video}1」指稱。${s.video_edit ? '也可以拿來做影片編輯或延長。' : ''}${note('video')}`;
+  $('#desc-audio').textContent = `最多 ${limitOf('audio')} 段 WAV／MP3，每段 ${clip('audio').join('–')} 秒、合計 ≤ ${sum('audio')} 秒、≤ 15 MB；`
+    + `用「${L.audio}1」指稱。${note('audio')}`;
+  for (const slot of ['image', 'video', 'audio']) $(`section[data-drop="${slot}"]`).hidden = !limitOf(slot);
+  $('#docCard').hidden = !limitOf('file') && !limitOf('link');
+  $('#modeDocs').hidden = !limitOf('file');
+  $('#frameNote').textContent = note('frame');
+  $('#frameNote').hidden = !note('frame');
+  $('#negBox').hidden = !s.negative_max;
+  if (s.negative_max) $('#negPrompt').maxLength = s.negative_max;
+  $('#prompt').placeholder = `描述畫面、動作、鏡頭與氛圍。例：${L.image}1的女生穿著${L.image}2的洋裝，走進${L.image}3的大廳，鏡頭緩慢跟隨…`;
+}
+
+// ---------- 模式與參數 ----------
+function setMode(mode) {
+  state.mode = mode;
+  renderMode();
+  renderParams();  // 首尾幀模式可能要鎖定比例
+  renderMedia();
+  saveSoon();
+}
+function renderMode() {
+  $$('.mode-btn').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === state.mode)));
+  // 圖片模式只有參考圖片（在「參考生成」的區塊裡），沒有兩種模式可選
+  $('#modeCard').hidden = isImage();
+  $('#refPanel').hidden = !isImage() && state.mode !== 'ref';
+  $('#framePanel').hidden = isImage() || state.mode !== 'frame';
+  $('#videoParams').hidden = isImage();
+  $('#imageParams').hidden = !isImage();
+}
+function setParams(fields) {
+  Object.assign(state.params, fields);
+  renderParams();
+  renderMeter();
+  renderIssues();
+  saveSoon();
+}
+// 這次實際會送出的參數：共用設定裡這個模型不支援的值換成可用的值，並列出換了什麼（顯示在送出前的提示）
+function effectiveParams(s = M()) {
+  const p = state.params, notes = [];
+  const name = v => RATIO_LABEL[v] || v;
+  const pick = (value, options, fallback, what) => {
+    const hit = options.find(o => o.toLowerCase() === String(value).toLowerCase());
+    if (!hit) notes.push(`${s.label} 沒有${what} ${name(value)}，這次用 ${name(fallback)}`);
+    return hit || fallback;
+  };
+  const resolution = pick(p.resolution, s.resolutions, s.defaults.resolution, '解析度');
+  let ratio = ratioLocked(s) ? 'adaptive' : pick(p.ratio, s.ratios, s.defaults.ratio, '比例');
+  if (ratio === 'adaptive' && adaptiveBlocked(s)) {
+    ratio = s.defaults.ratio;
+    notes.push(`${s.label} 純文字生影片不能用自適應比例，這次用 ${ratio}`);
+  }
+  const d = s.duration, auto = d.auto && p.auto;
+  const duration = auto ? -1 : Math.min(d.max, Math.max(d.min, Math.round(Number(p.duration) || d.min)));
+  if (p.auto && !d.auto) notes.push(`${s.label}（${PROVIDERS[s.provider].label}）沒有自動時長，這次用 ${duration} 秒`);
+  else if (!auto && duration !== Number(p.duration)) notes.push(`${s.label} 的時長是 ${d.min}–${d.max} 秒，這次用 ${duration} 秒`);
+  const params = { resolution, ratio, duration, audio: audioOn(s) };
+  for (const o of s.options) params[o] = !!p[o];
+  if (String(p.seed).trim() !== '') {
+    if (s.seed) params.seed = Number(p.seed);
+    else notes.push(`${s.label} 不能指定 Seed，這次不會送出`);
+  }
+  return { params, notes };
+}
+function segButton(label, pressed, onclick, icon) {
+  return h('button', { type: 'button', 'aria-pressed': String(pressed), onclick }, icon, label);
+}
+function ratioIcon(v) {
+  const [a, b] = v.split(':').map(Number), s = 13 / Math.max(a, b);
+  return h('span', { class: 'ratio-icon', style: `width:${Math.round(a * s)}px;height:${Math.round(b * s)}px`, 'aria-hidden': 'true' });
+}
+function renderParams() {
+  const s = M(), p = state.params, e = effectiveParams(s).params;
+  $('#resSeg').replaceChildren(...s.resolutions.map(r => segButton(r, e.resolution === r, () => setParams({ resolution: r }))));
+  const locked = ratioLocked(s), noAdaptive = adaptiveBlocked(s);
+  $('#ratioSeg').replaceChildren(...s.ratios.map(v => {
+    const b = segButton(RATIO_LABEL[v] || v, e.ratio === v, () => setParams({ ratio: v }), v === 'adaptive' ? null : ratioIcon(v));
+    b.disabled = locked ? v !== 'adaptive' : noAdaptive && v === 'adaptive';
+    return b;
+  }));
+  $('#ratioNote').hidden = !locked && !noAdaptive;
+  $('#ratioNote').textContent = locked ? `${s.label} 的首尾幀模式固定用自適應，輸出會跟首幀的比例一致`
+    : noAdaptive ? `${s.label} 純文字生影片要指定比例；加入參考素材後才能用自適應` : '';
+  const d = s.duration, auto = d.auto && p.auto;
+  for (const el of [$('#durRange'), $('#durNum')]) { el.min = d.min; el.max = d.max; }
+  const shown = auto ? Math.min(d.max, Math.max(d.min, p.duration)) : e.duration;
+  $('#durRange').value = shown;
+  if (document.activeElement !== $('#durNum')) $('#durNum').value = shown;
+  $('#durAutoBox').hidden = !d.auto;
+  $('#durAuto').checked = p.auto;
+  $('#durRange').disabled = $('#durNum').disabled = auto;
+  $('#durBox').classList.toggle('auto', auto);
+  $('#optAudio').checked = audioOn(s);
+  $('#optAudio').disabled = s.audio === 'always';
+  $('#audioAlways').hidden = s.audio !== 'always';
+  for (const [opt, id] of [['prompt_extend', 'optExtend'], ['watermark', 'optWatermark'], ['web_search', 'optWebSearch']]) {
+    $(`[data-opt="${opt}"]`).hidden = !s.options.includes(opt);
+    $('#' + id).checked = !!p[opt];
+  }
+  $('#seedLabel').hidden = $('#seedBox').hidden = !s.seed;  // 不能指定 seed 的模型（MiniMax H3）
+  if (s.seed) {
+    $('#seed').min = s.seed.random ? -1 : s.seed.min;
+    $('#seed').max = s.seed.max;
+  }
+  if (document.activeElement !== $('#seed')) $('#seed').value = p.seed;
+  $('#presetEdit').hidden = !s.video_edit;
+}
+function renderMeter() {
+  const s = M(), videos = itemsOf('video');
+  const show = state.mode === 'ref' && videos.length > 0 && limitOf('video') > 0;
+  const cap = s.ref_video_plus_output;  // 參考影片＋生成時長的上限（Wan 3.0 才有）
+  $('#editPresets').hidden = !show;
+  $('#videoMeter').hidden = !(show && cap);
+  if (!show || !cap) return;
+  const total = videos.reduce((sum, v) => sum + (v.duration || 0), 0);
+  const unknown = videos.some(v => v.duration == null);
+  const e = effectiveParams(s).params, gen = e.duration === -1 ? null : e.duration;
+  const sum = total + (gen || 0);
+  const meter = $('#videoMeter');
+  meter.classList.toggle('over', gen != null && sum > cap + 0.05);
+  meter.replaceChildren(
+    `參考影片 ${fmtSec(total)}${unknown ? '（有影片長度未知）' : ''} ＋ 生成 ${gen == null ? '自動' : gen + ' 秒'}`
+      + (gen == null ? `，合計需 ≤ ${cap} 秒` : ` ＝ ${fmtSec(sum)}／上限 ${cap} 秒`),
+    h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, sum / cap * 100)}%` })));
+}
+
+// ---------- 圖片的參數 ----------
+const ratioValue = r => { const [a, b] = String(r).split(':').map(Number); return a > 0 && b > 0 ? a / b : 1; };
+// Image 1（第一張讀得到尺寸的參考圖）的長寬比，「同參考圖」用
+function refRatio() {
+  const it = itemsOf('image').find(x => x.width && x.height);
+  return it ? it.width / it.height : null;
+}
+// 依長寬比和解析度（tier：pixels＝總像素約多少、long＝長邊多長，超過每邊或總像素上限時等比例縮小）算輸出尺寸。
+// 寬高要是 multiple 的倍數：在目標附近找長寬比最準的（差不到 0.05% 算一樣準，再挑像素數最接近的），
+// 所以 16:9 的 1K 是剛好 16:9 的 1280×720，不是差一點的 1360×768
+function fitSize(ratio, tier, rule) {
+  const k = rule.multiple, R = Math.max(ratio, 1 / ratio);  // 長邊／短邊
+  let long = tier.pixels ? Math.sqrt(tier.pixels * R) : tier.long;
+  long *= Math.min(1, rule.max_side / long, Math.sqrt(rule.max_pixels * R) / long);
+  const target = long * long / R, cands = [];
+  // pixels：長邊上下 7% 內找；long：長邊不超過指定的長度
+  for (let L = Math.ceil(long * 0.93 / k) * k; L <= long * (tier.pixels ? 1.07 : 1) + 1e-9; L += k) {
+    const S = Math.max(k, Math.round(L / R / k) * k), [w, h] = ratio >= 1 ? [L, S] : [S, L];
+    if (!sizeProblem(w, h, rule)) cands.push({ w, h, err: Math.abs(L / S - R) / R, dev: Math.abs(L * S - target) / target });
+  }
+  if (!cands.length) {  // 照理不會發生：退回直接取整
+    const L = Math.floor(long / k) * k, S = Math.round(L / R / k) * k;
+    return ratio >= 1 ? [L, S] : [S, L];
+  }
+  const minErr = Math.min(...cands.map(c => c.err));
+  const best = cands.filter(c => c.err <= minErr + 5e-4).sort((a, b) => a.dev - b.dev)[0];
+  return [best.w, best.h];
+}
+// 輸出尺寸不合規則時回傳原因（伺服器的 size_problem 是同一套）
+function sizeProblem(w, h, rule) {
+  if (!(w > 0 && h > 0)) return '寬高要是正整數';
+  if (w % rule.multiple || h % rule.multiple) return `寬高都必須是 ${rule.multiple} 的倍數`;
+  if (Math.max(w, h) > rule.max_side) return `每邊最多 ${rule.max_side} px`;
+  if (Math.max(w, h) > Math.min(w, h) * rule.max_ratio) return `長寬比最多 ${rule.max_ratio}:1`;
+  if (w * h < rule.min_pixels || w * h > rule.max_pixels) {
+    return `總像素要在 ${rule.min_pixels.toLocaleString()}–${rule.max_pixels.toLocaleString()} 之間（目前 ${(w * h).toLocaleString()}）`;
+  }
+  return '';
+}
+// 比例＋解析度的輸出尺寸：模型有指定（tier_sizes）就用指定的，不然照 fitSize 算
+function tierSize(s, ratio, tier) {
+  const fixed = s.tier_sizes?.[tier]?.[ratio];
+  return fixed ? fixed.split('x').map(Number) : fitSize(ratioValue(ratio), s.tiers[tier] || Object.values(s.tiers)[0], s.size);
+}
+// 這次的輸出尺寸 { w, h, notes }
+function imageSize(s = IM()) {
+  const p = state.imageParams, rule = s.size, notes = [];
+  if (p.ratio === 'custom') return { w: Math.round(Number(p.width)) || 0, h: Math.round(Number(p.height)) || 0, notes };
+  if (p.ratio !== 'ref') { const [w, h] = tierSize(s, p.ratio, p.tier); return { w, h, notes }; }
+  let r = refRatio();
+  if (r == null) { notes.push('還沒有參考圖，比例先用 1:1'); r = 1; }
+  const clamped = Math.min(rule.max_ratio, Math.max(1 / rule.max_ratio, r));
+  if (Math.abs(clamped - r) > 1e-9) notes.push(`參考圖的長寬比超過 ${rule.max_ratio}:1，這次用 ${rule.max_ratio}:1`);
+  // 參考圖的比例和指定尺寸的比例差不到 1%，就用指定的尺寸（GPT Image 2 才對得上有公開價格的尺寸）
+  const near = Object.entries(s.tier_sizes?.[p.tier] || {}).find(([k]) => Math.abs(ratioValue(k) / clamped - 1) < 0.01);
+  const [w, h] = near ? near[1].split('x').map(Number) : fitSize(clamped, s.tiers[p.tier] || Object.values(s.tiers)[0], rule);
+  return { w, h, notes };
+}
+const QUALITY_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
+// 這次送 generate 還是 edit：有參考圖就是 edit（伺服器也是這樣選）
+const imageEndpoint = () => itemsOf('image').length ? 'edit' : 'generate';
+// 這個端點收哪些選用參數。還沒重開的舊伺服器送來的模型清單沒有 extra_params（那時只有 2.5，全部都收）
+const extraParams = (s, endpoint) => s.extra_params?.[endpoint] ?? ['output_format', 'output_compression', 'background', 'moderation'];
+// 這次實際會送出的圖片參數：只放這個模型、這個端點收的參數（extra_params）。和影片一樣不改掉使用者選的值，
+// 例如選了透明背景又改成 JPEG、或換到沒有「最高」品質的模型，只在送出時換成可用的值，並在 notes 說明
+function effectiveImageParams(s = IM()) {
+  const p = state.imageParams, d = s.defaults, { w, h, notes } = imageSize(s);
+  const endpoint = imageEndpoint(), extra = extraParams(s, endpoint);
+  const int = (v, lo, hi, fallback) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback; };
+  let quality = p.quality;
+  if (!s.qualities.includes(quality)) {  // 用這個模型有的、不超過原本選的最高品質
+    const want = QUALITY_ORDER.indexOf(quality);
+    quality = want < 0 ? d.quality : [...s.qualities].reverse().find(q => QUALITY_ORDER.indexOf(q) <= want) || s.qualities[0];
+    if (want >= 0) notes.push(`${s.label} 沒有「${QUALITY_LABEL[p.quality]}」品質，這次用「${QUALITY_LABEL[quality]}」`);
+  }
+  const params = { size: `${w}x${h}`, quality, n: int(p.n, s.n.min, s.n.max, d.n) };
+  let format = 'png';  // 不收 output_format 的端點輸出 PNG
+  if (extra.includes('output_format')) {
+    format = s.formats.includes(p.format) ? p.format : d.output_format;
+    if (format !== p.format) notes.push(`${s.label} 不能輸出 ${FORMAT_LABEL[p.format] || p.format}，這次用 ${FORMAT_LABEL[format]}`);
+    params.output_format = format;
+  } else if (p.format !== 'png') {
+    notes.push(`${s.label} ${endpoint === 'edit' ? '改圖' : '文字生圖'}只能輸出 PNG`);
+  }
+  if (extra.includes('background')) {
+    let background = s.backgrounds.includes(p.background) ? p.background : d.background;
+    if (background === 'transparent' && !s.transparent_formats.includes(format)) {
+      notes.push(`${FORMAT_LABEL[format] || format} 不能有透明背景，這次背景用自動`);
+      background = 'auto';
+    }
+    params.background = background;
+  } else if (p.background === 'transparent') {
+    notes.push(`${s.label} 不能產生透明背景，這次背景用自動`);
+  }
+  if (extra.includes('moderation')) params.moderation = s.moderation.includes(p.moderation) ? p.moderation : d.moderation;
+  else if (p.moderation === 'low') notes.push(`${s.label} 不能調整內容審核，「寬鬆審核」這次不會生效`);
+  if (extra.includes('output_compression') && (format === 'jpeg' || format === 'webp')) {
+    params.output_compression = int(p.compression, 0, 100, d.output_compression);
+  }
+  return { params, notes, w, h, format, endpoint };
+}
+// 每張的價格（美元）。pixels：1024×1024 的價格按像素數換算；sizes：只有列出來的尺寸有價格，其他是 null
+function imagePrice(s, quality, w, h) {
+  const prices = state.prices[specKey(s)] || s.prices;
+  if (s.price_rule === 'sizes') return prices[`${Math.min(w, h)}x${Math.max(w, h)}`]?.[quality] ?? null;
+  const unit = prices[quality];
+  return unit == null ? null : unit * w * h / (1024 * 1024);
+}
+// 預估費用：每張的價格 × 張數，加上參考圖和提示詞（按 token 計價的模型才有）。沒有公開價格時是 null
+function imageCost(s, e) {
+  const per = imagePrice(s, e.params.quality, e.w, e.h);
+  if (per == null) return null;
+  const refs = e.endpoint === 'edit' ? Math.min(itemsOf('image').length, limitOf('image', s)) : 0;
+  const text = s.token_prices ? new TextEncoder().encode(state.prompt.trim()).length / 3 * s.token_prices.text / 1e6 : 0;
+  return { per, refs, total: per * e.params.n + refs * s.ref_price + text };
+}
+// 按尺寸計價的模型：這個品質有公開價格的尺寸，例如「1024×1024 $0.06、1024×1536／1536×1024 $0.12」
+function knownPrices(s, quality) {
+  return Object.entries(state.prices[specKey(s)] || s.prices).filter(([, q]) => q[quality] != null).map(([size, q]) => {
+    const [a, b] = size.split('x');
+    return `${a}×${b}${a !== b ? `／${b}×${a}` : ''} ${fmtUsd(q[quality])}`;
+  }).join('、');
+}
+// 生成完 GMI 回報的實際用量（outcome.request_usage）；按 token 計價的模型換算成費用，按尺寸計價的用每張的價格
+function imageUsageText(t) {
+  const u = t.usage, s = imageSpecOf(t), p = t.parameters || {};
+  if (!u || !s) return '';
+  let cost = null;
+  if (s.token_prices) {
+    const inp = u.input_tokens_details || {}, out = u.output_tokens_details || {}, tp = s.token_prices;
+    cost = ((inp.text_tokens || 0) * tp.text + (inp.image_tokens || 0) * tp.image + (out.image_tokens ?? u.output_tokens ?? 0) * tp.output) / 1e6;
+  } else if (p.size) {
+    const [w, h] = p.size.split('x').map(Number), per = imagePrice(s, p.quality, w, h);
+    if (per != null) cost = per * (p.n || 1);
+  }
+  return `用量：輸入 ${(u.input_tokens || 0).toLocaleString()}、輸出 ${(u.output_tokens || 0).toLocaleString()} tokens`
+    + (cost != null ? `，約 ${fmtUsd(cost)}` : '');
+}
+function setImageParams(fields) {
+  Object.assign(state.imageParams, fields);
+  renderImageParams();
+  renderIssues();
+  saveSoon();
+}
+function renderImageParams() {
+  const s = IM();
+  if (!s) return;
+  const p = state.imageParams, e = effectiveImageParams(s), hasRef = itemsOf('image').length > 0;
+  $('#imgRatioSeg').replaceChildren(...[...s.ratios, 'ref', 'custom'].map(v => {
+    const b = segButton(v === 'ref' ? '同參考圖' : v === 'custom' ? '自訂' : v, p.ratio === v, () => setImageParams({ ratio: v }),
+      v.includes(':') ? ratioIcon(v) : null);
+    if (v === 'ref') { b.disabled = !hasRef && p.ratio !== 'ref'; b.title = '輸出的長寬比跟 Image 1 一樣（改圖時常用）'; }
+    return b;
+  }));
+  const custom = p.ratio === 'custom';
+  $('#imgTierSeg').hidden = custom;
+  $('#imgCustom').hidden = !custom;
+  $('#imgTierSeg').replaceChildren(...Object.keys(s.tiers).map(t => segButton(t, p.tier === t, () => setImageParams({ tier: t }))));
+  for (const [id, v] of [['#imgW', p.width], ['#imgH', p.height]]) if (document.activeElement !== $(id)) $(id).value = v;
+  const problem = sizeProblem(e.w, e.h, s.size), note = $('#imgSizeNote');
+  note.textContent = `輸出 ${e.w}×${e.h}（${(e.w * e.h / 1e6).toFixed(1)} MP）` + (problem ? `：${problem}` : '');
+  note.style.color = problem ? 'var(--err)' : '';
+  $('#imgQualitySeg').replaceChildren(...s.qualities.map(q => segButton(QUALITY_LABEL[q] || q, e.params.quality === q, () => setImageParams({ quality: q }))));
+  const cost = imageCost(s, e);
+  $('#imgQualityNote').textContent = e.params.quality + (problem ? '' : cost ? `：這個尺寸約 ${fmtUsd(cost.per)}／張` : '：GMI 沒有公開這個尺寸的價格')
+    + '。越高越精細，但越慢、越貴';
+  for (const el of [$('#imgNRange'), $('#imgNNum')]) { el.min = s.n.min; el.max = s.n.max; }
+  $('#imgNRange').value = e.params.n;
+  if (document.activeElement !== $('#imgNNum')) $('#imgNNum').value = e.params.n;
+  // 這個端點不收 output_format（GPT Image 2 改圖）：只能 PNG，其他格式停用
+  const extra = extraParams(s, e.endpoint);
+  $('#imgFormatSeg').replaceChildren(...s.formats.map(f => {
+    const b = segButton(FORMAT_LABEL[f] || f, e.format === f, () => setImageParams({ format: f }));
+    if (!extra.includes('output_format') && f !== 'png') { b.disabled = true; b.title = `${s.label} 改圖只能輸出 PNG`; }
+    return b;
+  }));
+  $('#imgCompressionBox').hidden = e.params.output_compression == null;
+  if (document.activeElement !== $('#imgCompression')) $('#imgCompression').value = e.params.output_compression ?? p.compression;
+  const bgOk = s.backgrounds.length > 0 && extra.includes('background');
+  $('#imgBgLabel').hidden = $('#imgBgSeg').hidden = !bgOk;
+  $('#imgBgSeg').replaceChildren(...(bgOk ? s.backgrounds : []).map(b => {
+    const btn = segButton(BG_LABEL[b] || b, e.params.background === b, () => setImageParams({ background: b }));
+    if (b === 'transparent' && !s.transparent_formats.includes(e.format)) {
+      btn.disabled = true;
+      btn.title = `透明背景只能輸出 ${s.transparent_formats.map(f => FORMAT_LABEL[f] || f).join('／')}`;
+    }
+    return btn;
+  }));
+  $('#imgOptLabel').hidden = $('#imgOptBox').hidden = !(s.moderation.length > 0 && extra.includes('moderation'));
+  $('#imgModLow').checked = p.moderation === 'low';
+}
+
+// ---------- 檢查 ----------
+// level：error 紅、warn 黃、info 灰；block 為真時不能送出
+function collectIssues() {
+  if (isImage()) return collectImageIssues();
+  const out = [];
+  const add = (level, text, block = level === 'error') => out.push({ level, text, block });
+  const s = M(), items = activeItems(), prompt = state.prompt.trim(), frame = state.mode === 'frame';
+  const { params: e, notes } = effectiveParams(s);
+  const sumOf = slot => itemsOf(slot).reduce((sum, v) => sum + (v.duration || 0), 0);
+  if (!keySource()) add('error', `請先設定 ${P().label} 的 API key（右上角）`);
+  if (items.some(it => it.status === 'processing' || it.status === 'uploading')) add('info', '素材處理或上傳中，完成後才能送出', true);
+  if (items.some(it => it.status === 'error')) add('error', '有素材發生錯誤，請移除後再送出');
+  const unfit = items.filter(it => it.status === 'ready' && mediaProblem(it));
+  if (unfit.length) add('error', `有 ${unfit.length} 個素材不符合 ${s.label} 的限制（見素材上的紅字），請移除，或換回可以用的模型`);
+  // 素材各模型共用，換到上限比較小的模型時不會自動刪掉，讓使用者自己決定留哪些
+  for (const slot of activeSlots()) {
+    const n = itemsOf(slot).length, limit = limitOf(slot);
+    if (n > limit) add('error', `${s.label} 的${SLOT_NAME[slot]}最多 ${limit} 個，目前有 ${n} 個，請移除 ${n - limit} 個`);
+  }
+  for (const text of notes) add('info', text);
+  if (s.prompt_required && !prompt) add('info', `${s.label} 一定要有提示詞`, true);
+  if (frame) {
+    if (!itemsOf('first').length) add('info', itemsOf('last').length ? '用尾幀時必須也放首幀' : '請放入首幀圖片', true);
+    if (s.frame_ratio === 'suggest' && e.ratio !== 'adaptive') add('warn', '首尾幀模式建議比例選「自適應」，輸出才會跟首幀一致');
+  } else {
+    if (!prompt && !items.length) add('info', '請輸入提示詞，或加入素材', true);
+    const counts = { image: itemsOf('image').length, video: itemsOf('video').length, audio: itemsOf('audio').length };
+    if (counts.audio && limitOf('audio') && s.audio_alone === false && !counts.image && !counts.video) {
+      add('error', `${s.label} 不能只用參考音訊，要再加至少一張參考圖片或一段參考影片`);
+    }
+    for (const slot of ['video', 'audio']) {
+      const cap = s.clip_sum[API_TYPE[slot]], sum = sumOf(slot);
+      if (limitOf(slot) && cap && sum > cap + 0.05) add('error', `${SLOT_NAME[slot]}合計 ${fmtSec(sum)}，超過 ${s.label} 的 ${cap} 秒上限`);
+    }
+    if (counts.video && limitOf('video')) {
+      const cap = s.ref_video_plus_output, sum = sumOf('video');
+      if (cap && e.duration !== -1 && sum + e.duration > cap + 0.05) {
+        add('error', `參考影片 ${fmtSec(sum)} ＋ 生成 ${e.duration} 秒超過 ${cap} 秒，請縮短時長${s.duration.auto ? '或改用自動' : ''}`);
+      }
+      if (!prompt) add('warn', '有參考影片時，建議在提示詞說明要參考它、編輯它還是延長它');
+    }
+    if (items.length > s.media_total) add('error', `素材共 ${items.length} 個，${s.label} 最多 ${s.media_total} 個`);
+    const seen = new Set();
+    for (const m of prompt.matchAll(/(图片|圖片|图|圖|image\s*|视频|視頻|video\s*|音频|音頻|audio\s*)(\d+)/gi)) {
+      const kind = /^(图|圖|image)/i.test(m[1]) ? 'image' : /^(视频|視頻|video)/i.test(m[1]) ? 'video' : 'audio';
+      const n = Number(m[2]);
+      if (n > counts[kind] && !seen.has(m[0])) {
+        seen.add(m[0]);
+        add('warn', `提示詞提到「${m[0]}」，但目前只有 ${counts[kind]} 個${SLOT_NAME[kind]}`);
+      }
+    }
+  }
+  if (s.prompt_max && prompt.length > s.prompt_max) add('warn', `提示詞 ${prompt.length} 字，超過 ${s.label} 上限 ${s.prompt_max} 字的部分會被截掉`);
+  if (s.provider === 'mixroute') {  // 只有 MixRoute 把本機圖片轉成 base64 放進請求；GMI 是上傳後送網址
+    const base64Mb = items.filter(it => it.ref).reduce((sum, it) => sum + (it.bytes || 0), 0) * 4 / 3 / MB;
+    if (base64Mb > 30) add('warn', `本機圖片轉成 base64 後約 ${Math.round(base64Mb)} MB，請求太大可能被拒；建議開啟「自動最佳化」後重新加入圖片`);
+  }
+  const seed = String(state.params.seed).trim(), r = s.seed;
+  if (r && seed !== '' && !(/^-?\d+$/.test(seed) && ((r.random && Number(seed) === -1) || (Number(seed) >= r.min && Number(seed) <= r.max)))) {
+    add('error', `${s.label} 的 Seed 必須是 ${r.random ? '-1 或 ' : ''}${r.min}–${r.max} 的整數`);
+  }
+  const others = state.items.filter(it => !modeSlots().includes(it.slot)).length;
+  if (others) add('info', `「${frame ? '參考生成' : '首尾幀'}」模式裡還有 ${others} 個素材，這次不會送出`);
+  const skipped = modeSlots().filter(slot => !limitOf(slot)).flatMap(itemsOf).length;
+  if (skipped) add('warn', `${s.label}（${P().label}）不支援文件或網頁素材，這次不會送出${docsHint()}`);
+  const prices = state.prices[specKey(s)];
+  if (prices && e.duration > 0) {
+    const price = Object.entries(prices).find(([res]) => res.toLowerCase() === e.resolution.toLowerCase())?.[1];
+    if (price) {
+      add('info', `${P().label} 預估費用：${e.resolution} ${fmtUsd(price)}／秒 × ${e.duration} 秒 ≈ ${fmtUsd(price * e.duration)}（失敗不收費）`
+        + (!frame && itemsOf('video').length && s.notes.price ? '；' + s.notes.price : ''));
+    } else {
+      add('info', `${P().label} 沒有公開 ${s.label} ${e.resolution} 的單價（已知：${Object.entries(prices).map(([res, v]) => `${res} ${fmtUsd(v)}／秒`).join('、')}）`);
+    }
+  }
+  return out;
+}
+function collectImageIssues() {
+  const out = [];
+  const add = (level, text, block = level === 'error') => out.push({ level, text, block });
+  const s = IM(), items = activeItems(), prompt = state.prompt.trim(), e = effectiveImageParams(s);
+  if (!keySource()) add('error', `請先設定 ${P().label} 的 API key（右上角）`);
+  if (items.some(it => it.status === 'processing' || it.status === 'uploading')) add('info', '參考圖處理中，完成後才能送出', true);
+  if (items.some(it => it.status === 'error')) add('error', '有參考圖發生錯誤，請移除後再送出');
+  const unfit = items.filter(it => it.status === 'ready' && mediaProblem(it));
+  if (unfit.length) add('error', `有 ${unfit.length} 張參考圖不符合 ${s.label} 的限制（見圖上的紅字），請移除`);
+  const limit = limitOf('image');
+  if (items.length > limit) add('error', `${s.label} 的參考圖最多 ${limit} 張，目前有 ${items.length} 張，請移除 ${items.length - limit} 張`);
+  if (!prompt) add('info', `${s.label} 一定要有提示詞`, true);
+  const problem = sizeProblem(e.w, e.h, s.size);
+  if (problem) add('error', `輸出尺寸 ${e.w}×${e.h} 不行：${problem}`);
+  for (const text of e.notes) add('info', text);
+  add('info', items.length
+    ? `有 ${items.length} 張參考圖，這次用 ${s.edit}，照提示詞${items.length > 1 ? '修改或合成這些參考圖' : '修改這張參考圖'}`
+    : `沒有參考圖，這次用 ${s.generate}（文字生圖）`);
+  const seen = new Set();
+  for (const m of prompt.matchAll(/(图片|圖片|图|圖|image\s*)(\d+)/gi)) {
+    if (Number(m[2]) > items.length && !seen.has(m[0])) {
+      seen.add(m[0]);
+      add('warn', `提示詞提到「${m[0]}」，但目前只有 ${items.length} 張參考圖`);
+    }
+  }
+  const others = state.items.filter(it => it.slot !== 'image').length;
+  if (others) add('info', `影片用的素材（參考影片、音訊、首尾幀等）有 ${others} 個，生成圖片時不會送出`);
+  const cost = imageCost(s, e);
+  if (problem) {
+    // 尺寸不合規則，不估價
+  } else if (cost) {
+    add('info', `${P().label} 預估費用：${e.w}×${e.h}、品質 ${e.params.quality} 約 ${fmtUsd(cost.per)}／張 × ${e.params.n} 張`
+      + (cost.refs && s.ref_price ? ` ＋ 參考圖 ${cost.refs} 張` : '') + ` ≈ ${fmtUsd(cost.total)}`
+      + (s.price_rule === 'sizes' ? '（GMI 公布的每張價格）' : '（建立請求時預扣，預扣的就是實際費用）'));
+  } else {
+    add('warn', `GMI 沒有公開 ${s.label} ${e.w}×${e.h} 的價格，實際費用請到 GMI 後台確認`
+      + `（品質 ${e.params.quality} 有公開的：${knownPrices(s, e.params.quality)}）`);
+  }
+  return out;
+}
+let submitting = false;
+function renderIssues() {
+  const issues = collectIssues();
+  $('#issues').replaceChildren(...issues.map(i => h('li', { class: i.level, text: i.text })));
+  $('#submitBtn').disabled = submitting || issues.some(i => i.block);
+  if (!$('#previewBox').hidden) renderPreview();
+}
+
+// ---------- 送出 ----------
+function mediaOf(it) {
+  const m = { id: it.id, type: API_TYPE[it.slot], name: it.name };
+  if (it.ref) m.ref = it.ref;
+  else if (it.local) Object.assign(m, { local: it.local, url: it.url, expires_at: it.expires_at, ttl: it.ttl });
+  else m.url = it.url;
+  for (const k of ['duration', 'width', 'height', 'bytes', 'notes']) if (it[k] != null) m[k] = it[k];
+  return m;
+}
+function buildRequest() {
+  if (isImage()) {  // 模型送 image_models.py 的 id，伺服器依有沒有參考圖選 generate 或 edit
+    const s = IM();
+    return { kind: 'image', provider: s.provider, model: s.id, prompt: state.prompt.trim(),
+      parameters: effectiveImageParams(s).params, media: activeItems().map(mediaOf) };
+  }
+  const s = M();
+  const req = {
+    provider: state.provider,
+    model: state.model,
+    mode: state.mode,
+    prompt: state.prompt.trim(),
+    parameters: effectiveParams(s).params,
+    media: activeItems().map(mediaOf),
+  };
+  if (s.negative_max && state.negative.trim()) req.negative_prompt = state.negative.trim();
+  return req;
+}
+const submitLabel = () => isImage() ? '生成圖片' : '生成影片';
+// 預覽由伺服器用送出時同一套程式組出來（不上傳檔案），各 API、各模型的格式都不用在網頁這邊再寫一次
+let previewTimer, previewSeq = 0;
+function renderPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const mine = ++previewSeq;
+    let text;
+    try { text = JSON.stringify((await api('/api/preview', { method: 'POST', json: buildRequest() })).request, null, 2); }
+    catch (e) { text = '（還不能送出：' + e.message + '）'; }
+    if (mine === previewSeq) $('#previewBox').textContent = text;
+  }, 200);
+}
+async function submit() {
+  const blocker = collectIssues().find(i => i.block);
+  if (blocker) { toast(blocker.text, 'error'); return; }
+  if (submitting) return;
+  submitting = true;
+  const btn = $('#submitBtn');
+  btn.textContent = '送出中…';
+  renderIssues();
+  try {
+    const record = await api('/api/tasks', { method: 'POST', json: buildRequest() });
+    for (const m of record.media || []) {  // 過期的臨時連結在送出時重傳過了，記下新網址（GMI 的網址放在 gmi_url，不影響這裡）
+      const it = state.items.find(x => x.id === m.id);
+      if (it && it.local && m.url && m.expires_at) Object.assign(it, { url: m.url, expires_at: m.expires_at });
+    }
+    renderMedia();
+    saveState();
+    toast(record.kind === 'image' ? '已送出，圖片生成完會自動存到 outputs/' : '已送出，完成後影片會自動存到 outputs/');
+    refreshTasks();
+  } catch (e) {
+    toast('送出失敗：' + e.message, 'error');
+  } finally {
+    submitting = false;
+    btn.textContent = submitLabel();
+    renderIssues();
+  }
+}
+
+// ---------- 任務列表 ----------
+let tasks = [];
+let clockSkew = 0;
+let serverDown = false;
+let refreshTimer;
+const taskNodes = new Map();  // task_id → { sig, node }
+// 任務用的模型設定（標籤的寫法用得到）；加入 GMI 之前的紀錄沒有 provider，加入模型切換之前的沒有 model，
+// 圖片任務有 kind: 'image'
+const taskSpec = t => t.kind === 'image' ? imageSpecOf(t) || IM() || M()
+  : findSpec(t.provider || 'mixroute', t.model || DEFAULT_MODEL) || M();
+const taskFiles = t => t.files || (t.file ? [t.file] : []);
+
+function statusOf(t) {
+  const s = String(t.status || '').toUpperCase();
+  if (s === 'SUCCESS') {
+    if (taskFiles(t).length) return ['success', '完成'];
+    return t.downloading || t.polling ? ['running', t.kind === 'image' ? '下載圖片中' : '下載影片中'] : ['failure', '下載失敗'];
+  }
+  if (FAILED.has(s)) return ['failure', s === 'UNKNOWN' ? '找不到任務' : '失敗'];
+  if (t.error && !t.polling && !t.downloading) return ['failure', '查詢中斷'];
+  if (s === 'IN_PROGRESS' || s === 'RUNNING') return ['running', '生成中'];
+  return ['queued', '排隊中'];
+}
+function taskMedia(t) {
+  const media = t.media || [];
+  if (!media.length) return null;
+  const ts = taskSpec(t), counters = {};
+  return h('div', { class: 'task-media' }, media.map(m => {
+    const slot = SLOT_OF[m.type];
+    counters[slot] = (counters[slot] || 0) + 1;
+    const src = m.ref ? '/outputs/inputs/' + m.ref : (['image', 'first', 'last'].includes(slot) ? m.url : null);
+    return h('div', { class: 'mini', title: [m.name, m.url && !m.local ? m.url : ''].filter(Boolean).join('\n') },
+      src ? h('img', { src, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' })
+        : { video: '🎬', audio: '🎵', file: '📄', link: '🔗' }[slot] || '•',
+      h('b', { text: slot ? labelOf(slot, counters[slot], ts) : m.type }));
+  }));
+}
+function taskChips(t) {
+  const p = t.parameters || {};
+  const provider = t.provider || 'mixroute';
+  const providerLabel = Object.hasOwn(PROVIDERS, provider) ? PROVIDERS[provider].label : provider;
+  if (t.kind === 'image') {
+    const parts = [providerLabel, imageSpecOf(t)?.label || t.model, /-edit$/.test(t.model || '') ? '改圖' : '文字生圖'];
+    if (p.size) parts.push(p.size.replace('x', '×'), `品質 ${p.quality}`, `${p.n || 1} 張`, FORMAT_LABEL[p.output_format] || p.output_format);
+    if (p.background && p.background !== 'auto') parts.push(`${BG_LABEL[p.background] || p.background}背景`);
+    if (p.moderation === 'low') parts.push('寬鬆審核');
+    return h('div', { class: 'meta-chips' }, parts.filter(Boolean).map(text => h('span', { text })));
+  }
+  const parts = [providerLabel, modelLabel(t.model || DEFAULT_MODEL)];
+  if (p.resolution) {
+    parts.push(p.resolution, p.ratio === 'adaptive' ? '自適應' : p.ratio, p.duration === -1 ? '自動時長' : p.duration + ' 秒', p.audio ? '有聲' : '無聲');
+    if (p.prompt_extend) parts.push('擴寫');
+    if (p.watermark) parts.push('浮水印');
+    if (p.web_search) parts.push('聯網搜尋');
+    if (p.seed != null) parts.push('seed ' + p.seed);
+  }
+  return h('div', { class: 'meta-chips' }, parts.map(text => h('span', { text })));
+}
+function buildTask(t) {
+  const [cls, label] = statusOf(t);
+  const busy = !!(t.polling || t.downloading);
+  const pct = parseInt(t.progress, 10);
+  const prompt = h('p', { class: 'task-prompt' + (t.prompt ? '' : ' none'), text: t.prompt || (t.imported ? '（用 ID 查詢的任務）' : '（沒有提示詞）') });
+  if (t.prompt) prompt.addEventListener('click', () => prompt.classList.toggle('open'));
+  const usage = t.usage || {};
+  const actions = [];
+  const files = taskFiles(t), image = t.kind === 'image';
+  if (files.length) {
+    actions.push(h('button', { class: 'btn small', type: 'button', text: state.platform === 'darwin' ? '在 Finder 顯示' : '顯示檔案', onclick: () => reveal(files[0]) }));
+  }
+  if (t.file && !image) {
+    actions.push(h('a', { class: 'btn small', href: '/outputs/' + encodeURIComponent(t.file), target: '_blank', rel: 'noopener', text: '開新分頁', style: 'text-decoration:none;color:inherit' }));
+  }
+  let video = null;
+  if (t.file && !image) {
+    video = h('video', { src: '/outputs/' + encodeURIComponent(t.file), controls: true, preload: 'metadata', playsinline: true });
+    // 只載入 metadata 時有些瀏覽器不畫第一格，定位一下當封面
+    video.addEventListener('loadedmetadata', () => { if (video.currentTime === 0) video.currentTime = 0.001; }, { once: true });
+  }
+  // 生成的圖片：點一下放大，可以拿去繼續編輯或做成影片
+  const images = image && files.length ? h('div', { class: 'img-grid' + (files.length === 1 ? ' single' : '') }, files.map((f, i) =>
+    h('button', { class: 'checker', type: 'button', title: '點一下放大', onclick: () => openViewer(t, i) },
+      h('img', { src: '/outputs/' + encodeURIComponent(f), alt: `第 ${i + 1} 張`, loading: 'lazy', decoding: 'async' })))) : null;
+  if (!t.imported || t.prompt || (t.media || []).length) {
+    actions.push(h('button', { class: 'btn small', type: 'button', text: '重用設定', title: '把模型、提示詞、參數和素材載入到左邊', onclick: () => reuseTask(t) }));
+  }
+  if (!busy && !files.length && !FAILED.has(String(t.status).toUpperCase())) {
+    actions.push(h('button', { class: 'btn small', type: 'button', text: '重新查詢', onclick: () => taskAction(t, 'refresh') }));
+  }
+  // 圖片任務生成完才有 GMI 的 request_id，在那之前只有本機的 ID，複製了也查不到
+  const shownId = image ? t.request_id : t.task_id;
+  if (shownId) actions.push(h('button', { class: 'btn small', type: 'button', text: '複製 ID', onclick: () => copyText(shownId) }));
+  actions.push(h('button', { class: 'btn small danger', type: 'button', text: '移除', onclick: () => taskAction(t, 'remove') }));
+  return h('article', { class: 'task', 'data-id': t.task_id },
+    h('div', { class: 'task-top' },
+      h('span', { class: 'badge ' + cls }, busy ? h('span', { class: 'spin', style: 'width:10px;height:10px' }) : null, label),
+      cls === 'running' && t.progress ? h('span', { class: 'count', text: t.progress }) : null,
+      h('span', { class: 'time', 'data-start': t.created_at, 'data-end': t.finished_at || '', 'data-busy': busy ? '1' : '' })),
+    busy && cls !== 'success' ? h('div', { class: 'task-bar' + (Number.isNaN(pct) ? ' indeterminate' : '') }, h('i', { style: `width:${Number.isNaN(pct) ? 0 : pct}%` })) : null,
+    prompt,
+    t.negative_prompt ? h('p', { class: 'task-neg', text: '負面：' + t.negative_prompt }) : null,
+    taskChips(t),
+    taskMedia(t),
+    video,
+    images,
+    t.error ? h('div', { class: 'err', text: t.error }) : null,
+    usage.output_video_duration ? h('div', { class: 'soft', text: `輸出 ${usage.output_video_duration} 秒${usage.SR ? ' · ' + usage.SR + 'P' : ''}` }) : null,
+    image && t.usage ? h('div', { class: 'soft', text: imageUsageText(t) }) : null,
+    h('div', { class: 'task-actions' }, actions, shownId ? h('span', { class: 'id', text: shownId, title: shownId }) : null));
+}
+function renderTasks() {
+  const list = $('#taskList');
+  $('#taskEmpty').hidden = tasks.length > 0;
+  const ids = new Set(tasks.map(t => t.task_id));
+  for (const [id, cached] of taskNodes) if (!ids.has(id)) { cached.node.remove(); taskNodes.delete(id); }
+  let prev = null;
+  for (const t of tasks) {  // 新的在上面；舊卡片不搬動，播放中的影片才不會被打斷
+    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.error, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, (t.media || []).length, state.platform]);
+    let cached = taskNodes.get(t.task_id);
+    if (!cached || cached.sig !== sig) {
+      const node = buildTask(t);
+      if (cached) cached.node.replaceWith(node);
+      else if (prev) prev.after(node);
+      else list.prepend(node);
+      cached = { sig, node };
+      taskNodes.set(t.task_id, cached);
+    }
+    prev = cached.node;
+  }
+  tickTimes();
+}
+function tickTimes() {
+  const now = Date.now() / 1000 - clockSkew;
+  for (const el of $$('#taskList .time')) {
+    const start = Number(el.dataset.start), end = Number(el.dataset.end);
+    el.textContent = end ? `${fmtDate(start)} · 耗時 ${fmtClock(end - start)}`
+      : el.dataset.busy ? `${fmtDate(start)} · 已經 ${fmtClock(now - start)}` : fmtDate(start);
+  }
+}
+async function refreshTasks() {
+  clearTimeout(refreshTimer);
+  try {
+    const data = await api('/api/tasks');
+    tasks = data.tasks;
+    clockSkew = Date.now() / 1000 - data.now;
+    if (serverDown) toast('已重新連上本機伺服器');
+    serverDown = false;
+    renderTasks();
+  } catch (e) {
+    if (!serverDown) toast(e.message, 'error');
+    serverDown = true;
+  }
+  const busy = tasks.some(t => t.polling || t.downloading);
+  refreshTimer = setTimeout(refreshTasks, busy ? 2500 : 10000);
+}
+async function taskAction(t, action) {
+  try {
+    if (action === 'remove') {
+      const image = t.kind === 'image', running = image && (t.polling || t.downloading) && !taskFiles(t).length;
+      if (!confirm(`從列表移除這個任務？\n（只移除紀錄，已下載的${image ? '圖片' : '影片檔'}會留在 outputs/）`
+        + (running ? '\n圖片還在生成：移除後不會下載，但 GMI 照樣會收費。' : ''))) return;
+      await api('/api/tasks/' + encodeURIComponent(t.task_id), { method: 'DELETE' });
+    } else {
+      await api('/api/tasks/' + encodeURIComponent(t.task_id) + '/refresh', { method: 'POST' });
+    }
+    refreshTasks();
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function reveal(file) {
+  try { await api('/api/reveal', { method: 'POST', json: { file } }); } catch (e) { toast(e.message, 'error'); }
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast('已複製 ' + text); } catch { prompt('複製這個 task_id：', text); }
+}
+function reuseTask(t) {
+  if (t.kind === 'image') return reuseImageTask(t);
+  const wasImage = isImage();
+  state.kind = 'video';  // 影片任務載入到影片模式
+  const busyForm = state.prompt.trim() || activeItems().length;
+  if (busyForm && !confirm('用這個任務的提示詞、參數和素材取代左邊目前的內容？')) {
+    if (wasImage) state.kind = 'image';
+    return;
+  }
+  const from = t.provider || 'mixroute', model = t.model || DEFAULT_MODEL, before = specKey();
+  // 換成這個任務用的模型：目前的 API 也有這個模型就只換模型，沒有的話連 API 一起換
+  if (findSpec(state.provider, model)) state.model = model;
+  else if (findSpec(from, model)) { state.lastModel[state.provider] = state.model; state.provider = from; state.model = model; }
+  state.lastModel[state.provider] = state.model;
+  const media = t.media || [];
+  state.mode = t.mode === 'frame' || media.some(m => m.type === 'first_frame') ? 'frame' : 'ref';
+  state.prompt = t.prompt || '';
+  state.negative = t.negative_prompt || '';
+  const p = t.parameters || {};
+  if (p.resolution) {
+    state.params = {
+      ...DEFAULT_PARAMS,
+      resolution: p.resolution, ratio: p.ratio || DEFAULT_PARAMS.ratio,
+      duration: p.duration > 0 ? p.duration : state.params.duration, auto: p.duration === -1,
+      prompt_extend: !!p.prompt_extend, watermark: !!p.watermark, web_search: !!p.web_search,
+      seed: p.seed != null ? String(p.seed) : '',
+    };
+    if (M().audio === 'toggle' && model === state.model) state.audio[specKey()] = !!p.audio;
+  }
+  const slots = activeSlots();
+  state.items.filter(it => slots.includes(it.slot)).forEach(it => removeItem(it.id, true));
+  for (const m of media) {
+    const slot = SLOT_OF[m.type];
+    if (!slot) continue;
+    const it = {
+      id: newId(), slot, status: 'ready', notes: Array.isArray(m.notes) ? m.notes : [], name: m.name || shortUrl(m.url || ''),
+      source: m.ref || m.local ? 'local' : 'url', ref: m.ref, url: m.url, local: m.local, expires_at: m.expires_at, ttl: m.ttl,
+      duration: m.duration, width: m.width, height: m.height, bytes: m.bytes,
+    };
+    it.preview = previewFor(it);
+    state.items.push(it);
+  }
+  $('#prompt').value = state.prompt;
+  $('#negPrompt').value = state.negative;
+  renderAll();
+  renderKey();
+  saveState();
+  fixImages();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const where = `${P().label} · ${M().label}`;
+  toast(from !== state.provider || model !== state.model
+    ? `已載入這個任務的設定（原本用 ${PROVIDERS[from]?.label || from} · ${modelLabel(model)} 產生，這次會送到 ${where}）`
+    : wasImage || specKey() !== before ? `已載入這個任務的設定，並切換到 ${where}` : '已載入這個任務的設定');
+}
+// 圖片任務的「重用設定」：切到圖片模式，換上它的模型、提示詞、參數和參考圖（影片用的素材不動）
+function reuseImageTask(t) {
+  const spec = imageSpecOf(t);
+  if (!spec) { toast(`找不到 ${t.model} 這個圖片模型`, 'error'); return; }
+  const busyForm = state.prompt.trim() || itemsOf('image').length;
+  if (busyForm && !confirm('用這個任務的提示詞、參數和參考圖取代左邊目前的內容？')) return;
+  state.kind = 'image';
+  state.imageModel = spec.id;
+  state.prompt = t.prompt || '';
+  const p = t.parameters || {};
+  if (p.size) state.imageParams = imageParamsFrom(p, spec);
+  itemsOf('image').forEach(it => removeItem(it.id, true));
+  for (const m of t.media || []) {
+    if (m.type !== 'reference_image') continue;
+    const it = {
+      id: newId(), slot: 'image', status: 'ready', notes: Array.isArray(m.notes) ? m.notes : [], name: m.name || shortUrl(m.url || ''),
+      source: m.ref ? 'local' : 'url', ref: m.ref, url: m.ref ? undefined : m.url, width: m.width, height: m.height, bytes: m.bytes,
+    };
+    it.preview = previewFor(it);
+    state.items.push(it);
+  }
+  $('#prompt').value = state.prompt;
+  renderAll();
+  renderKey();
+  saveState();
+  fixImages();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast(`已載入這個任務的設定（${spec.label}）`);
+}
+// 任務紀錄的參數（size 是 WxH）換回表單的設定：尺寸對得上某個比例＋解析度就選它，不然用自訂寬高
+function imageParamsFrom(p, spec) {
+  const [w, h] = String(p.size).split('x').map(Number);
+  let ratio = 'custom', tier = state.imageParams.tier;
+  for (const r of spec.ratios) {
+    for (const t of Object.keys(spec.tiers)) {
+      const [W, H] = tierSize(spec, r, t);
+      if (W === w && H === h && ratio === 'custom') { ratio = r; tier = t; }
+    }
+  }
+  const d = spec.defaults;
+  return {
+    ...DEFAULT_IMAGE_PARAMS, ratio, tier, width: w || 1024, height: h || 1024, quality: p.quality || d.quality, n: p.n || d.n,
+    format: p.output_format || d.output_format, compression: p.output_compression ?? d.output_compression,
+    background: p.background || d.background, moderation: p.moderation || d.moderation,
+  };
+}
+
+// ---------- 生成的圖片：放大檢視，拿去繼續編輯或做成影片 ----------
+let viewing = null;  // { task, index }
+function openViewer(t, index) {
+  viewing = { task: t, index };
+  renderViewer();
+  if (!$('#viewer').open) $('#viewer').showModal();
+}
+function renderViewer() {
+  const files = taskFiles(viewing.task), file = files[viewing.index], src = '/outputs/' + encodeURIComponent(file);
+  $('#viewerImg').src = src;
+  $('#viewerImg').alt = file;
+  $('#viewerTitle').textContent = (files.length > 1 ? `第 ${viewing.index + 1}／${files.length} 張 · ` : '') + file;
+  $('#viewerPrev').hidden = $('#viewerNext').hidden = files.length < 2;
+  $('#viewerOpen').href = src;
+  $('#viewerReveal').textContent = state.platform === 'darwin' ? '在 Finder 顯示' : '顯示檔案';
+}
+function stepViewer(d) {
+  const n = taskFiles(viewing.task).length;
+  viewing.index = (viewing.index + d + n) % n;
+  renderViewer();
+}
+// target：edit＝圖片模式的參考圖（繼續改），image＝影片的參考圖片，first／last＝影片的首尾幀。
+// 和拖進來的圖片走同一套處理（轉成每個模型都能用的格式），不會刪掉原本的素材
+async function useOutput(target) {
+  const file = taskFiles(viewing.task)[viewing.index], slot = target === 'edit' ? 'image' : target;
+  $('#viewer').close();
+  if (target === 'edit') setKind('image');
+  else { setKind('video'); if (state.mode !== (target === 'image' ? 'ref' : 'frame')) setMode(target === 'image' ? 'ref' : 'frame'); }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (state.items.some(it => it.from === file && it.slot === slot)) { toast('這張圖已經加進去了'); return; }
+  if (slot === 'image' && !roomFor('image', file)) return;
+  try {
+    const res = await fetch('/outputs/' + encodeURIComponent(file));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    addLocalImage(new File([blob], file, { type: blob.type }), slot, { from: file });
+    toast(slot === 'image' ? `已加進參考圖（${labelOf('image', itemsOf('image').length)}）` : `已放到影片的${SLOT_NAME[slot]}`);
+  } catch (e) {
+    toast('讀不到這張圖：' + e.message, 'error');
+  }
+}
+
+// ---------- API key ----------
+function renderKey() {
+  const pill = $('#keyPill'), src = keySource();
+  pill.className = 'pill ' + (src ? 'ok' : 'bad');
+  pill.textContent = src === 'env' ? 'API key：環境變數' : src ? 'API key：已設定' : 'API key：未設定';
+  pill.title = `${P().label} 的 API key，點一下更換`;
+}
+let keyProvider = state.provider;  // 對話框正在設定哪一個 API 的 key
+function openKeyDialog() {
+  const cap = P();
+  keyProvider = curProvider();
+  $('#keyTitle').textContent = `${cap.label} API key`;
+  $('#keyInput').value = '';
+  $('#keyInput').placeholder = cap.placeholder;
+  $('#keyErr').hidden = true;
+  $('#keyRemember').checked = !!safeGet(cap.keyStore);
+  $('#keyDesc').textContent = keySource() === 'env'
+    ? `目前使用環境變數 ${cap.env}。在這裡輸入會改用新的 key，直到 video_ui.py 關閉為止。`
+    : `key 只會傳給本機的 video_ui.py 並放在記憶體；也可以設好環境變數 ${cap.env} 再啟動。`;
+  $('#keyDialog').showModal();
+  $('#keyInput').focus();
+}
+async function saveKey(provider, key, remember, quiet) {
+  const res = await api('/api/key', { method: 'POST', json: { provider, key } });
+  state.keys[provider] = res.key_source;
+  if (res.prices) state.prices = res.prices;
+  const storeKey = PROVIDERS[provider].keyStore;
+  try { remember ? localStorage.setItem(storeKey, key) : localStorage.removeItem(storeKey); } catch { /* 存不了就算了 */ }
+  renderKey();
+  renderIssues();
+  if (res.warning) toast(res.warning);
+  else if (!quiet) toast(`${PROVIDERS[provider].label} API key 已設定`);
+  refreshTasks();
+}
+
+// ---------- 切換影片／圖片、API 與模型 ----------
+// 提示詞和參考圖片兩邊共用；影片的模式、參數和圖片的參數各自保留，切回來還是原本的設定
+function setKind(kind) {
+  if (kind === state.kind || (kind === 'image' && !IMAGE_CATALOG)) return;
+  state.kind = kind;
+  renderAll();
+  renderKey();
+  saveSoon();
+  if (serverOk && !keySource()) openKeyDialog();
+}
+function setProvider(name) {
+  if (isImage()) return;  // 圖片模型只有 GMI 有，按鈕是停用的
+  if (!Object.hasOwn(PROVIDERS, name) || name === state.provider) return;
+  state.lastModel[state.provider] = state.model;
+  state.provider = name;
+  // 還原這個 API 上次用的模型；沒用過就沿用目前的模型，這個 API 沒有的話用第一個
+  const last = state.lastModel[name];
+  if (findSpec(name, last)) state.model = last;
+  else if (!M()) state.model = modelsOf(name)[0].id;
+  renderAll();
+  renderKey();
+  saveSoon();
+  if (serverOk && !keySource()) openKeyDialog();
+}
+function setModel(id) {
+  if (isImage()) {
+    if (id === state.imageModel || !(IMAGE_CATALOG || []).some(m => m.id === id)) return;
+    state.imageModel = id;
+  } else {
+    if (id === state.model || !findSpec(state.provider, id)) return;
+    state.model = state.lastModel[state.provider] = id;
+  }
+  renderAll();
+  saveSoon();
+}
+function modelSummary(m) {
+  if (m.kind === 'image') {
+    return `${m.label}：${m.summary}；參考圖最多 ${m.media.reference_image} 張、品質 ${m.qualities.length} 級、每邊最大 ${m.size.max_side} px`;
+  }
+  const n = t => m.media[t] || 0;
+  return `${m.label}：${m.duration.min}–${m.duration.max} 秒、${m.resolutions.join('／')}；`
+    + `參考圖 ${n('reference_image')} 張、影片 ${n('reference_video')} 段、音訊 ${n('reference_audio')} 段`;
+}
+function renderProvider() {
+  const s = S(), img = isImage();
+  $$('#kindSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.kind === state.kind)));
+  $$('#providerSeg button').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.dataset.provider === curProvider()));
+    b.disabled = img && b.dataset.provider !== curProvider();
+    b.title = b.disabled ? `圖片生成目前只有 ${P().label}` : '';
+  });
+  $$('[data-only]').forEach(el => { el.hidden = img || el.dataset.only !== state.provider; });
+  $$('[data-kind-only]').forEach(el => { el.hidden = el.dataset.kindOnly !== state.kind; });
+  const select = $('#modelSelect');
+  const models = img ? IMAGE_CATALOG : modelsOf(state.provider);
+  select.replaceChildren(...models.map(m => h('option', { value: m.id, text: m.label, title: modelSummary(m) })));
+  select.value = s.id;
+  if (img) {
+    select.title = models.map(modelSummary).join('\n');
+  } else {
+    // 別的 API 才有的模型，提示一下要去哪裡用
+    const elsewhere = (CATALOG || []).filter(m => m.provider !== state.provider && !findSpec(state.provider, m.id));
+    select.title = [modelSummary(s), ...elsewhere.map(m => `${m.label}：切換到 ${PROVIDERS[m.provider].label} 才能用`)].join('\n');
+  }
+  $('#brandTitle').textContent = document.title = `${s.label} ${img ? '圖片' : '影片'}生成`;
+  renderBrandSub();
+  $('#importId').placeholder = img ? '用 request_id 查詢 GMI 圖片請求' : state.provider === 'gmi' ? '用 request_id 查詢 GMI 請求' : '用 task_id 查詢既有任務';
+  if (!submitting) $('#submitBtn').textContent = submitLabel();
+}
+// 標題下的「API · 模型 ID」；圖片模式依有沒有參考圖顯示這次會用 generate 還是 edit
+function renderBrandSub() {
+  const s = S();
+  $('#brandSub').textContent = `${P().label} · ${isImage() ? (activeItems().length ? s.edit : s.generate) : s.id}`;
+}
+
+// ---------- 事件 ----------
+function renderAll() {
+  renderProvider();
+  renderSpec();
+  renderMode();
+  renderParams();
+  renderImageParams();
+  renderMedia();
+  updatePromptCount();
+}
+function updatePromptCount() {
+  const s = S(), n = state.prompt.length, max = s.prompt_max, el = $('#promptCount');
+  el.textContent = max ? `${n.toLocaleString()} / ${max.toLocaleString()}` : `${n.toLocaleString()} 字`;
+  el.classList.toggle('over', !!max && n > max);
+  $('#negCount').textContent = `${state.negative.length} / ${M().negative_max || 500}`;
+}
+function bindEvents() {
+  $$('#kindSeg button').forEach(b => b.addEventListener('click', () => setKind(b.dataset.kind)));
+  $$('#providerSeg button').forEach(b => b.addEventListener('click', () => setProvider(b.dataset.provider)));
+  $('#modelSelect').addEventListener('change', e => setModel(e.target.value));
+  $$('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  $('#prompt').addEventListener('input', e => { state.prompt = e.target.value; updatePromptCount(); renderIssues(); saveSoon(); });
+  $('#negPrompt').addEventListener('input', e => { state.negative = e.target.value; updatePromptCount(); renderIssues(); saveSoon(); });
+  $('#optimize').addEventListener('change', e => { state.optimize = e.target.checked; saveSoon(); });
+  $('#ttl').addEventListener('change', e => { state.ttl = e.target.value; saveSoon(); });
+  $('#durRange').addEventListener('input', e => setParams({ duration: Number(e.target.value) }));
+  $('#durNum').addEventListener('change', e => {
+    const d = M().duration;
+    setParams({ duration: Math.min(d.max, Math.max(d.min, Math.round(Number(e.target.value) || d.min))) });
+  });
+  $('#durAuto').addEventListener('change', e => setParams({ auto: e.target.checked }));
+  $('#optAudio').addEventListener('change', e => { state.audio[specKey()] = e.target.checked; setParams({}); });
+  $('#optExtend').addEventListener('change', e => setParams({ prompt_extend: e.target.checked }));
+  $('#optWatermark').addEventListener('change', e => setParams({ watermark: e.target.checked }));
+  $('#optWebSearch').addEventListener('change', e => setParams({ web_search: e.target.checked }));
+  $('#seed').addEventListener('input', e => setParams({ seed: e.target.value.trim() }));
+  $('#seedDice').addEventListener('click', () => setParams({ seed: String(Math.floor(Math.random() * 2147483648)) }));
+  $('#seedClear').addEventListener('click', () => setParams({ seed: '' }));
+  $('#resetParams').addEventListener('click', () => {
+    const s = M();
+    delete state.audio[specKey(s)];
+    setParams({ ...DEFAULT_PARAMS, resolution: s.defaults.resolution, ratio: s.defaults.ratio, duration: s.defaults.duration });
+  });
+  $('#presetEdit').addEventListener('click', () => {
+    const s = M();
+    if (s.duration.auto) { setParams({ ratio: 'adaptive', auto: true }); toast('已套用：比例自適應、時長自動'); }
+    else { setParams({ ratio: 'adaptive' }); toast(`已套用：比例自適應（${s.label}（${P().label}）沒有自動時長，請自行設定）`); }
+  });
+  $('#presetExtend').addEventListener('click', () => { setParams({ ratio: 'adaptive' }); toast('已套用：比例自適應'); });
+
+  // 圖片的參數：自訂寬高自動取最接近的 16 的倍數
+  const snap = v => { const k = IM().size.multiple; return Math.max(k, Math.round((Number(v) || 0) / k) * k); };
+  $('#imgW').addEventListener('change', e => setImageParams({ width: snap(e.target.value) }));
+  $('#imgH').addEventListener('change', e => setImageParams({ height: snap(e.target.value) }));
+  $('#imgNRange').addEventListener('input', e => setImageParams({ n: Number(e.target.value) }));
+  $('#imgNNum').addEventListener('change', e => {
+    const r = IM().n;
+    setImageParams({ n: Math.min(r.max, Math.max(r.min, Math.round(Number(e.target.value) || r.min))) });
+  });
+  $('#imgCompression').addEventListener('change', e => setImageParams({ compression: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) }));
+  $('#imgModLow').addEventListener('change', e => setImageParams({ moderation: e.target.checked ? 'low' : 'auto' }));
+  $('#resetImageParams').addEventListener('click', () => {
+    const d = IM().defaults;
+    setImageParams({ ...DEFAULT_IMAGE_PARAMS, quality: d.quality, n: d.n, format: d.output_format, compression: d.output_compression,
+      background: d.background, moderation: d.moderation });
+  });
+
+  // 放大檢視生成的圖片
+  $('#viewerClose').addEventListener('click', () => $('#viewer').close());
+  $('#viewerPrev').addEventListener('click', () => stepViewer(-1));
+  $('#viewerNext').addEventListener('click', () => stepViewer(1));
+  $('#viewer').addEventListener('click', e => { if (e.target === $('#viewer')) $('#viewer').close(); });  // 點背景關閉
+  $('#viewer').addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); stepViewer(e.key === 'ArrowLeft' ? -1 : 1); }
+  });
+  $$('#viewer [data-use]').forEach(b => b.addEventListener('click', () => useOutput(b.dataset.use)));
+  $('#viewerReveal').addEventListener('click', () => reveal(taskFiles(viewing.task)[viewing.index]));
+  $('#previewBtn').addEventListener('click', () => {
+    const box = $('#previewBox');
+    box.hidden = !box.hidden;
+    $('#previewBtn').textContent = box.hidden ? '預覽請求 JSON' : '隱藏 JSON';
+    if (!box.hidden) renderPreview();
+  });
+  $('#submitBtn').addEventListener('click', submit);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing && !$('#keyDialog').open && !$('#viewer').open) { e.preventDefault(); submit(); }
+  });
+
+  // 網址欄：按鈕或 Enter 加入
+  const addFromInput = async slot => {
+    const input = $(`[data-url="${slot}"]`);
+    if (input.value.trim() && await addUrl(slot, input.value)) input.value = '';
+  };
+  $$('[data-add-url]').forEach(b => b.addEventListener('click', () => addFromInput(b.dataset.addUrl)));
+  // 中文輸入法按 Enter 選字時 isComposing 為真，不能當成送出
+  const onEnter = (input, fn) => input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.isComposing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); fn(); }
+  });
+  $$('[data-url]').forEach(i => onEnter(i, () => addFromInput(i.dataset.url)));
+  onEnter($('#keyInput'), () => $('#keyForm').requestSubmit());
+  onEnter($('#importId'), () => $('#importForm').requestSubmit());
+
+  $('#filePicker').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; addFiles(files, pickerSlot); });
+
+  // 拖放檔案：丟到哪裡都行，依檔案類型分類；首尾幀模式可指定丟到哪一格
+  const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+  let depth = 0;
+  document.addEventListener('dragenter', e => { if (hasFiles(e)) { depth++; document.body.classList.add('file-drag'); } });
+  document.addEventListener('dragleave', e => { if (hasFiles(e) && --depth <= 0) { depth = 0; document.body.classList.remove('file-drag'); } });
+  document.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  document.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    document.body.classList.remove('file-drag');
+    addFiles([...e.dataTransfer.files], e.target.closest?.('[data-drop]')?.dataset.drop);
+  });
+  document.addEventListener('paste', e => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (!files.length) return;
+    e.preventDefault();
+    addFiles(files);
+  });
+
+  $('#keyPill').addEventListener('click', openKeyDialog);
+  $('#keyCancel').addEventListener('click', () => $('#keyDialog').close());
+  $('#keyForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const key = $('#keyInput').value.trim();
+    if (!key) return;
+    const btn = $('#keySave');
+    btn.disabled = true;
+    btn.textContent = '驗證中…';
+    try {
+      await saveKey(keyProvider, key, $('#keyRemember').checked);
+      $('#keyDialog').close();
+    } catch (err) {
+      $('#keyErr').textContent = err.message;
+      $('#keyErr').hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '儲存';
+    }
+  });
+  $('#importForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = $('#importId').value.trim();
+    if (!id) return;
+    try {
+      await api('/api/tasks/import', { method: 'POST', json: isImage()
+        ? { kind: 'image', task_id: id, provider: curProvider(), model: IM().id }
+        : { task_id: id, provider: state.provider, model: state.model } });
+      $('#importId').value = '';
+      refreshTasks();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+async function init() {
+  if (!CATALOG) {
+    // 直接開 HTML 檔（file:、data: 等），或舊版的 video_ui.py 送來的網頁，沒有模型清單就畫不出表單
+    const file = !/^https?:$/.test(location.protocol);
+    $('.layout').before(h('div', { class: 'file-warning', role: 'alert' },
+      h('b', { text: file ? '這個頁面要透過本機伺服器開啟，直接開 HTML 檔無法使用。' : '本機的 video_ui.py 是舊版，沒有切換模型的功能。' }),
+      h('div', { text: file
+        ? '請雙擊專案資料夾裡的「AI 影片生成」App（或在終端機執行 python3 video_ui.py），瀏覽器會自動打開 http://127.0.0.1:8765'
+        : '請先結束正在跑的 video_ui.py（終端機按 Ctrl+C，或關掉這個網頁等 10 分鐘讓它自動結束），再重新開啟 App。' })));
+    $('.layout').hidden = true;
+    return;
+  }
+  loadState();
+  $('#kindSwitch').hidden = !IMAGE_CATALOG;
+  $('#prompt').value = state.prompt;
+  $('#negPrompt').value = state.negative;
+  $('#optimize').checked = state.optimize;
+  $('#ttl').value = state.ttl;
+  bindEvents();
+  renderAll();
+  try {
+    const cfg = await api('/api/config');
+    // 網頁每次都從磁碟讀，但舊的伺服器程式還在跑時會不認得 provider，全部送到 MixRoute
+    if (!cfg.keys) throw new Error('本機的 video_ui.py 是舊版，沒有切換 API 的功能：請關掉它再重新開啟 App');
+    serverOk = true;
+    Object.assign(state.keys, cfg.keys);
+    state.prices = cfg.prices || {};
+    state.platform = cfg.platform;
+    // 伺服器上沒有 key 的 API，帶入記在瀏覽器裡的 key
+    await Promise.all(Object.entries(PROVIDERS).map(async ([name, cap]) => {
+      const remembered = safeGet(cap.keyStore);
+      if (state.keys[name] || !remembered) return;
+      try { await saveKey(name, remembered, true, true); } catch (e) { toast(`記住的 ${cap.label} API key 無法使用：` + e.message, 'error'); }
+    }));
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+  renderKey();
+  renderIssues();
+  refreshTasks();
+  if (serverOk) fixImages();
+  if (serverOk && !keySource()) openKeyDialog();
+  setInterval(tickTimes, 1000);
+  setInterval(renderMedia, 60000);  // 更新臨時連結是否過期
+}
+init();
+</script>
+</body>
+</html>

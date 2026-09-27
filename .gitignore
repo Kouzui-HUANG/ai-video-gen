@@ -1,0 +1,48 @@
+# 執行資料：生成的影片／圖片、任務紀錄（tasks.json）、素材副本（inputs/）、啟動記錄
+# video_ui.py 啟動時會自己建立 outputs/
+outputs/
+
+# 影片、圖片、音訊與文件素材：放在專案其他地方也不上傳（確定要加入的檔案用 git add -f）
+*.mp4
+*.mov
+*.m4v
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.gif
+*.heic
+*.mp3
+*.wav
+*.m4a
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.pages
+*.numbers
+
+# API key 等機密：金鑰用環境變數或在網頁輸入，不要存成檔案（*.key 也涵蓋 Keynote 素材）
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*secret*
+*credential*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本機工具設定與系統檔
+.claude/
+.DS_Store
