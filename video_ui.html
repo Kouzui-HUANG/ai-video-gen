@@ -239,6 +239,7 @@ textarea { width: 100%; resize: vertical; min-height: 140px; line-height: 1.6; d
   white-space: nowrap; font-size: 13px;
 }
 .btn:hover { background: var(--panel-2); }
+.btn:disabled { opacity: .5; cursor: not-allowed; background: var(--panel); }
 .btn.small { padding: 3px 9px; font-size: 12.5px; }
 .btn.danger:hover { color: var(--err); border-color: var(--err); }
 .primary {
@@ -329,6 +330,7 @@ pre.preview {
 .task video { width: 100%; max-height: 420px; border-radius: 8px; background: #000; margin-top: 10px; display: block; }
 .task .err { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--err-weak); color: var(--err); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
 .task .soft { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.task .soft.warn { color: var(--warn); }
 .task-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
 .task-actions .id { margin-left: auto; font: 11px ui-monospace, Menlo, monospace; color: var(--faint); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { color: var(--muted); text-align: center; padding: 40px 12px; border: 1.5px dashed var(--border-strong); border-radius: var(--radius); }
@@ -409,6 +411,12 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
 .set-box.good .sub, .set-box.warn .sub { color: inherit; opacity: .8; }
 .set-box .acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 2px; }
 .set-box .acts a { font-size: 12.5px; }
+/* 輸出資料夾：目前的路徑、手動輸入路徑 */
+.set-label .set-path { display: block; margin-top: 5px; color: var(--text); word-break: break-all; }
+.path-form label { color: var(--muted); font-size: 12.5px; }
+.path-row { display: flex; gap: 6px; align-items: center; }
+.path-row input { flex: 1; min-width: 0; padding: 5px 8px; font: 12.5px ui-monospace, Menlo, monospace; }
+.path-err { color: var(--err); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: min(420px, calc(100vw - 32px)); }
 .toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); animation: pop .18s ease-out; white-space: pre-wrap; word-break: break-word; }
 .toast.error { background: var(--err); color: #fff; }
@@ -630,7 +638,7 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
       </form>
     </div>
     <div class="task-list" id="taskList"></div>
-    <p class="empty" id="taskEmpty" hidden>還沒有任務。左邊填好後按「生成」，完成的影片和圖片會自動存到 outputs/。</p>
+    <p class="empty" id="taskEmpty" hidden>還沒有任務。左邊填好後按「生成」，完成的影片和圖片會自動存到輸出資料夾。</p>
   </section>
 </main>
 
@@ -664,7 +672,7 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
     <a class="btn small" id="viewerOpen" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">開新分頁</a>
   </div>
 </dialog>
-<!-- 選項：主題、語言、自動更新、通知存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
+<!-- 選項：主題、語言、自動更新、通知、輸出資料夾存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
 <dialog id="settingsDialog" class="settings" aria-labelledby="settingsTitle">
   <div class="settings-top">
     <h2 id="settingsTitle">選項</h2>
@@ -724,16 +732,27 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
       </div>
     </section>
 
-    <section class="set-group soon" aria-labelledby="setStorage">
-      <h3 id="setStorage">儲存 <span class="soon-tag">即將推出</span></h3>
+    <section class="set-group" aria-labelledby="setStorage">
+      <h3 id="setStorage">儲存</h3>
       <div class="set-row">
-        <div class="set-label"><b>輸出資料夾</b><small id="outputsDir">生成的影片、圖片和任務紀錄存放的位置</small></div>
-        <button class="btn small" type="button" disabled>變更…</button>
+        <div class="set-label"><b>輸出資料夾</b><small>生成的影片和圖片存到這裡。變更後只影響之後的檔案，之前的檔案留在原處，任務列表照樣看得到。</small>
+          <code class="set-path" id="outDirPath">—</code></div>
+        <div class="set-ctl">
+          <button class="btn small" type="button" id="outDirOpen">打開</button>
+          <button class="btn small" type="button" id="outDirPick" title="跳出選擇資料夾的視窗">變更…</button>
+          <button class="btn small" type="button" id="outDirReset" title="改回專案裡的 outputs/" hidden>改回預設</button>
+        </div>
       </div>
-      <div class="set-row">
-        <div class="set-label"><b>素材副本</b><small>加入過的本機素材會在 outputs/inputs/ 留一份副本，重用設定時會用到；之後可在這裡查看占用空間和清理</small></div>
-        <button class="btn small" type="button" disabled>清理…</button>
-      </div>
+      <div class="set-box" id="outDirBox" role="status" hidden></div>
+      <form class="set-box path-form" id="outDirForm" hidden>
+        <label for="outDirInput">輸入資料夾的完整路徑；還沒有這個資料夾的話會自動建立</label>
+        <div class="path-row">
+          <input type="text" id="outDirInput" spellcheck="false" autocomplete="off" autocapitalize="off">
+          <button class="btn small" type="submit" id="outDirApply">套用</button>
+          <button class="btn small" type="button" id="outDirFormCancel">取消</button>
+        </div>
+        <div class="path-err" id="outDirErr" role="alert" hidden></div>
+      </form>
     </section>
 
     <section class="set-group soon" aria-labelledby="setDefaults">
@@ -2088,7 +2107,7 @@ async function submit() {
     }
     renderMedia();
     saveState();
-    toast(record.kind === 'image' ? '已送出，圖片生成完會自動存到 outputs/' : '已送出，完成後影片會自動存到 outputs/');
+    toast(record.kind === 'image' ? `已送出，圖片生成完會自動存到${outLabel()}` : `已送出，完成後影片會自動存到${outLabel()}`);
     refreshTasks();
   } catch (e) {
     toast('送出失敗：' + e.message, 'error');
@@ -2213,6 +2232,7 @@ function buildTask(t) {
     video,
     images,
     t.error ? h('div', { class: 'err', text: t.error }) : null,
+    t.notice ? h('div', { class: 'soft warn', text: t.notice }) : null,  // 輸出資料夾不能用，改存到 outputs/
     usage.output_video_duration ? h('div', { class: 'soft', text: `輸出 ${usage.output_video_duration} 秒${usage.SR ? ' · ' + usage.SR + 'P' : ''}` }) : null,
     usageText ? h('div', { class: 'soft', text: usageText }) : null,
     h('div', { class: 'task-actions' }, actions, shownId ? h('span', { class: 'id', text: shownId, title: shownId }) : null));
@@ -2220,11 +2240,12 @@ function buildTask(t) {
 function renderTasks() {
   const list = $('#taskList');
   $('#taskEmpty').hidden = tasks.length > 0;
+  $('#taskEmpty').textContent = `還沒有任務。左邊填好後按「生成」，完成的影片和圖片會自動存到${outLabel()}。`;
   const ids = new Set(tasks.map(t => t.task_id));
   for (const [id, cached] of taskNodes) if (!ids.has(id)) { cached.node.remove(); taskNodes.delete(id); }
   let prev = null;
   for (const t of tasks) {  // 新的在上面；舊卡片不搬動，播放中的影片才不會被打斷
-    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.parts, t.error, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, (t.media || []).length, state.platform]);
+    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.parts, t.error, t.notice, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, (t.media || []).length, state.platform]);
     let cached = taskNodes.get(t.task_id);
     if (!cached || cached.sig !== sig) {
       const node = buildTask(t);
@@ -2255,9 +2276,10 @@ async function refreshTasks() {
     clockSkew = Date.now() / 1000 - data.now;
     if (serverDown) toast('已重新連上本機伺服器');
     serverDown = false;
-    renderTasks();
-    // 別的分頁或瀏覽器改了選項：跟著改。這個網頁正在儲存選項時不採用，免得蓋掉還沒存好的變更
+    // 別的分頁或瀏覽器改了選項：跟著改。這個網頁正在儲存選項時不採用，免得蓋掉還沒存好的變更。
+    // 先採用再畫任務：沒有任務時的說明寫著輸出資料夾
     if (data.settings && !settingsBusy && rev === settingsRev) adoptSettings(data.settings);
+    renderTasks();
     noticeFinished();
   } catch (e) {
     if (!serverDown && !restarting) toast(e.message, 'error');
@@ -2270,7 +2292,7 @@ async function taskAction(t, action) {
   try {
     if (action === 'remove') {
       const image = t.kind === 'image', running = image && (t.polling || t.downloading) && !taskFiles(t).length;
-      if (!confirm(`從列表移除這個任務？\n（只移除紀錄，已下載的${image ? '圖片' : '影片檔'}會留在 outputs/）`
+      if (!confirm(`從列表移除這個任務？\n（只移除紀錄，已下載的${image ? '圖片' : '影片檔'}不會刪除）`
         + (running ? '\n圖片還在生成：移除後不會下載，但 GMI 照樣會收費。' : ''))) return;
       await api('/api/tasks/' + encodeURIComponent(t.task_id), { method: 'DELETE' });
     } else {
@@ -2510,6 +2532,7 @@ function renderSettings() {
   $('#soundTest').disabled = !audioSupported();
   renderNotifyHint();
   renderUpdate();
+  renderOutDir();
 }
 function renderUpdate(busyText) {
   const box = $('#updateBox'), u = update;
@@ -2546,6 +2569,7 @@ function openSettings() {
   notifyTested = false;  // 測試通知的說明只在按「測試」的那次顯示
   renderSettings();
   $('#settingsDialog').showModal();
+  loadOutDir();  // 輸出資料夾現在能不能用（外接硬碟可能拔掉了）
 }
 async function saveSetting(changes) {
   const before = settings;
@@ -2569,10 +2593,141 @@ async function saveSetting(changes) {
 // 輪詢任務時帶回來的選項和這邊的不一樣（在別的分頁或瀏覽器改過）
 function adoptSettings(fresh) {
   if (JSON.stringify(fresh) === JSON.stringify(settings)) return;
+  const dirChanged = fresh.outputs_dir !== settings?.outputs_dir;
   settings = fresh;
   applyTheme();
   if (settings.sound) audioContext();
-  if ($('#settingsDialog').open) renderSettings();
+  if ($('#settingsDialog').open) {
+    renderSettings();
+    if (dirChanged) loadOutDir();
+  }
+}
+
+// ---------- 輸出資料夾 ----------
+// 生成的影片、圖片存到哪裡：settings.outputs_dir，null 是專案的 outputs/。「變更…」請伺服器跳出系統的選擇資料夾視窗，
+// 選好才回應；視窗跳不出來（例如 Linux 沒有 zenity）或選的資料夾不能用時，改成直接輸入路徑
+let defaultOutputs = '';  // 專案的 outputs/ 的完整路徑（/api/config 的 outputs_dir）
+let outDir = null;        // 伺服器回報的狀態：{ dir, default, custom, problem（不能用的原因）, picker（跳得出選擇資料夾的視窗）}
+let outDirMode = '';      // ''、picking（選擇資料夾的視窗開著）、manual（輸入路徑）、saving（套用輸入的路徑中）
+let outDirError = '';     // 輸入的路徑（或選的資料夾）不能用的原因，顯示在輸入框下面
+let pickSeq = 0;          // 第幾次按「變更…」：取消後馬上又按，先前那次的回應不能改到這次的狀態
+const baseName = p => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
+// 提示文字裡的輸出資料夾，接在「存到」後面：預設是 outputs/（前面空一格），自己選的用資料夾名稱
+const outLabel = () => settings?.outputs_dir ? `「${baseName(settings.outputs_dir)}」資料夾` : ' outputs/';
+
+function renderOutDir() {
+  const ok = !!settings && 'outputs_dir' in settings;  // 舊版伺服器的選項沒有輸出資料夾
+  const custom = settings?.outputs_dir || '', def = outDir?.default || defaultOutputs;
+  const busy = outDirMode === 'picking' || outDirMode === 'saving';
+  $('#outDirPath').textContent = custom || (def ? def + '（預設）' : '—');
+  $('#outDirOpen').disabled = !ok;
+  $('#outDirOpen').title = { darwin: '在 Finder 打開這個資料夾', win32: '在檔案總管打開這個資料夾' }[state.platform] || '打開這個資料夾';
+  $('#outDirPick').disabled = !ok || busy;
+  $('#outDirReset').hidden = !custom;
+  $('#outDirReset').disabled = !ok || busy;
+  const box = $('#outDirBox');
+  box.replaceChildren();
+  box.className = 'set-box';
+  box.hidden = true;
+  if (settings && !ok) {
+    box.hidden = false;
+    box.classList.add('warn');
+    box.append(h('div', { text: '本機的 video_ui.py 是舊版，還不能變更輸出資料夾：請關掉它再重新開啟 App。' }));
+  } else if (outDirMode === 'picking') {
+    box.hidden = false;
+    box.append(h('div', {}, h('span', { class: 'spin' }), ' 請在跳出的視窗選擇資料夾…'),
+      h('div', { class: 'sub', text: '沒看到視窗的話，可能被其他視窗擋住了。' }),
+      h('div', { class: 'acts' },
+        h('button', { class: 'btn small', type: 'button', text: '取消', onclick: () => cancelPick(false) }),
+        h('button', { class: 'link-btn', type: 'button', text: '改成輸入路徑', onclick: () => cancelPick(true) })));
+  } else if (custom && outDir?.custom === custom && outDir.problem) {
+    box.hidden = false;
+    box.classList.add('warn');
+    box.append(h('div', { text: `目前無法使用這個資料夾：${outDir.problem}。` }),
+      h('div', { class: 'sub', text: '在它恢復之前，新的影片和圖片會先存到專案的 outputs/。' }));
+  }
+  $('#outDirForm').hidden = !ok || !(outDirMode === 'manual' || outDirMode === 'saving');
+  $('#outDirInput').disabled = $('#outDirApply').disabled = outDirMode === 'saving';
+  $('#outDirApply').textContent = outDirMode === 'saving' ? '套用中…' : '套用';
+  $('#outDirErr').textContent = outDirError;
+  $('#outDirErr').hidden = !outDirError;
+}
+async function loadOutDir() {
+  try { outDir = (await api('/api/outputs-dir')).storage; } catch { /* 舊版伺服器或連不到：照選項顯示 */ }
+  if ($('#settingsDialog').open) renderOutDir();
+}
+// 選好或輸入的資料夾交給伺服器檢查、存起來；這段期間輪詢任務帶回來的選項不採用（見 settingsRev）
+async function changeOutDir(body) {
+  settingsBusy++;
+  settingsRev++;
+  try {
+    const res = await api('/api/outputs-dir', { method: 'POST', json: body });
+    if (res.storage) outDir = res.storage;
+    if (res.settings) settings = res.settings;
+    return res;
+  } finally {
+    settingsBusy--;
+    settingsRev++;
+  }
+}
+function outDirChanged() {
+  toast(settings.outputs_dir ? `之後生成的影片和圖片會存到 ${settings.outputs_dir}` : '之後生成的影片和圖片會存到專案的 outputs/');
+  renderTasks();  // 沒有任務時的說明寫著輸出資料夾
+}
+function openOutDirForm(error = '') {
+  outDirMode = 'manual';
+  outDirError = error;
+  $('#outDirInput').value = settings?.outputs_dir || outDir?.default || defaultOutputs;
+  renderOutDir();
+  $('#outDirInput').focus();
+  $('#outDirInput').select();
+}
+async function pickOutDir() {
+  if (outDir && !outDir.picker) return openOutDirForm();  // 這台電腦跳不出選擇資料夾的視窗
+  const seq = ++pickSeq;
+  outDirMode = 'picking';
+  outDirError = '';
+  renderOutDir();
+  try {
+    const res = await changeOutDir({ pick: true });
+    if (seq !== pickSeq) return;
+    if (outDirMode === 'picking') outDirMode = '';
+    if (!res.canceled) outDirChanged();
+  } catch (e) {
+    if (seq === pickSeq) openOutDirForm(e.message);  // 視窗跳不出來，或選的資料夾不能用：改成輸入路徑
+    return;
+  }
+  renderSettings();
+}
+// 選擇資料夾的視窗開著時按「取消」或「改成輸入路徑」：請伺服器關掉那個視窗
+async function cancelPick(toManual) {
+  pickSeq++;
+  if (toManual) openOutDirForm();
+  else {
+    outDirMode = '';
+    renderOutDir();
+  }
+  try { await api('/api/outputs-dir', { method: 'POST', json: { cancel: true } }); } catch (e) { toast(e.message, 'error'); }
+}
+// path：輸入框的路徑（fromForm），或 null＝改回預設
+async function applyOutDir(path, fromForm = false) {
+  if (fromForm) outDirMode = 'saving';
+  outDirError = '';
+  renderOutDir();
+  try {
+    await changeOutDir({ path });
+    outDirMode = '';
+    outDirChanged();
+  } catch (e) {
+    if (!fromForm) return toast(e.message, 'error');
+    outDirMode = 'manual';
+    outDirError = e.message;
+  }
+  renderSettings();
+  if (outDirMode === 'manual') $('#outDirInput').focus();
+}
+async function openOutDir() {
+  try { await api('/api/reveal', { method: 'POST', json: { folder: true } }); } catch (e) { toast(e.message, 'error'); }
 }
 async function checkUpdate() {
   $('#checkUpdate').disabled = true;
@@ -3039,6 +3194,12 @@ function bindEvents() {
   $('#notifyTest').addEventListener('click', testNotify);
   $('#soundOn').addEventListener('change', e => { saveSetting({ sound: e.target.checked }); wakeAudio(); });
   $('#soundTest').addEventListener('click', () => { playChime('success'); playChime('failure', 0.9); });
+  $('#outDirOpen').addEventListener('click', openOutDir);
+  $('#outDirPick').addEventListener('click', pickOutDir);
+  $('#outDirReset').addEventListener('click', () => applyOutDir(null));
+  $('#outDirFormCancel').addEventListener('click', () => { outDirMode = ''; outDirError = ''; renderOutDir(); });
+  $('#outDirForm').addEventListener('submit', e => { e.preventDefault(); applyOutDir($('#outDirInput').value, true); });
+  onEnter($('#outDirInput'), () => $('#outDirForm').requestSubmit());
   document.addEventListener('click', wakeAudio, true);
   document.addEventListener('keydown', wakeAudio, true);
   // 在瀏覽器的網站設定改了通知權限：選項裡的說明跟著更新
@@ -3109,7 +3270,7 @@ async function init() {
     update = cfg.update || null;
     if (settings) applyTheme();
     if (settings?.sound) audioContext();  // 重新整理前點過網頁的話，Chrome 現在就能出聲
-    if (cfg.outputs_dir) $('#outputsDir').textContent = `生成的影片、圖片和任務紀錄存放在 ${cfg.outputs_dir}`;
+    defaultOutputs = cfg.outputs_dir || '';
     if (update?.state === 'updated' && safeGet(NOTICED_KEY) !== update.current.sha) {
       toast(`已更新到 ${update.current.label}`);
       try { localStorage.setItem(NOTICED_KEY, update.current.sha); } catch { /* 存不了就算了 */ }

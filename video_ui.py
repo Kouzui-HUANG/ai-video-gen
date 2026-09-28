@@ -22,10 +22,11 @@
   Litterbox (litterbox.catbox.moe) 取得臨時公開網址，到期自動刪除，期間拿到連結的人都能下載。
 - GMI：素材只收公開網址，本機圖片、影片、音訊在送出時上傳到 GMI 自己的儲存空間取得公開網址
   （拿到連結的人都能下載）；不支援文件和網頁素材。
-- 完成的影片存到 outputs/<task_id>.mp4，圖片存到 outputs/<request_id>.png（一次多張時加 -1、-2…），
+- 完成的影片存成 <task_id>.mp4，圖片存成 <request_id>.png（一次多張時加 -1、-2…），放在輸出資料夾：預設是 outputs/，
+  可以在選項改成別的資料夾（只影響之後的檔案，任務紀錄記著每個檔案存在哪裡）。
   任務紀錄在 outputs/tasks.json；加入過的本機素材副本在 outputs/inputs/（重用設定、臨時連結過期重傳時會用到）。
 - 網頁右上角的齒輪是「選項」：主題（跟隨系統／亮色／暗色）、語言（目前只有繁體中文）、啟動時自動更新、
-  任務完成時的通知與提示音，存在 outputs/settings.json。通知和提示音由網頁發出，網頁要開著（在背景也可以）。
+  任務完成時的通知與提示音、輸出資料夾，存在 outputs/settings.json。通知和提示音由網頁發出，網頁要開著（在背景也可以）。
 - 自動更新（updater.py）：啟動時比對 GitHub 上 main 的最新 commit，有新版就用 git 快轉更新，再重新啟動自己載入新版。
   只支援用 git clone 下載的專案；本機有還沒 commit 的修改、還沒推上 GitHub 的 commit，或不在 main 分支時略過。
 """
@@ -36,6 +37,8 @@ import json
 import mimetypes
 import os
 import re
+import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -108,7 +111,43 @@ SETTING_CHOICES = {
     "sound": (False, True),  # 任務完成、失敗時播放提示音
 }
 DEFAULT_SETTINGS = {name: choices[0] for name, choices in SETTING_CHOICES.items()}
+# 輸出資料夾：生成的影片、圖片存在哪裡。None 是專案的 outputs/，不然是使用者選的完整路徑（能不能用，存的時候和下載時才檢查）
+DEFAULT_SETTINGS["outputs_dir"] = None
 UPDATED_ENV = "VIDEO_UI_UPDATED"  # 更新後重新啟動時，用這個環境變數把更新結果交給新的程序
+
+# 選項「輸出資料夾」按「變更…」時跳出的系統選擇資料夾視窗（見 picker_command）
+PICK_PROMPT = "選擇輸出資料夾：生成的影片和圖片會存到這裡"
+# macOS：用 JXA 直接開 NSOpenPanel。AppleScript 的 choose folder 從背景程序跳出來會被瀏覽器擋在後面，這裡先把自己設成前景
+MAC_PICKER = """ObjC.import('AppKit');
+function run(argv) {
+  var app = $.NSApplication.sharedApplication;
+  app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
+  app.activateIgnoringOtherApps(true);
+  var panel = $.NSOpenPanel.openPanel;
+  panel.canChooseFiles = false;
+  panel.canChooseDirectories = true;
+  panel.canCreateDirectories = true;
+  panel.message = argv[0];
+  panel.prompt = argv[1];
+  panel.directoryURL = $.NSURL.fileURLWithPathIsDirectory(argv[2], true);
+  panel.level = $.NSModalPanelWindowLevel;
+  return panel.runModal == $.NSModalResponseOK ? ObjC.unwrap(panel.URL.path) : '';
+}"""
+# Windows：PowerShell 的 FolderBrowserDialog。擁有者設成最上層視窗，才不會被瀏覽器擋住；
+# 提示文字和一開始的資料夾用環境變數傳，路徑轉成 base64 輸出，中文不受主控台編碼影響
+WIN_PICKER = """Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = $env:VIDEO_UI_PICK_PROMPT
+$dialog.ShowNewFolderButton = $true
+$dialog.SelectedPath = $env:VIDEO_UI_PICK_START
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($dialog.SelectedPath))
+}
+$owner.Dispose()
+"""
 
 store = None  # TaskStore，main() 建立
 _keys = {name: {"value": os.environ.get(p["env"]) or None} for name, p in PROVIDERS.items()}
@@ -129,6 +168,8 @@ _version = None  # 正在執行的版本（updater.current_version()），main()
 _update = None  # 最近一次檢查更新的結果，給選項頁顯示；關掉自動更新又還沒手動檢查時是 None
 _update_lock = threading.Lock()
 _restart_status = None  # 選項頁按了「立即更新並重新啟動」：伺服器停下後帶著這個結果重新啟動
+_picker = None  # 正開著的選擇資料夾視窗（subprocess.Popen），一次只開一個
+_picker_lock = threading.Lock()
 
 
 class TaskStore:
@@ -816,9 +857,9 @@ def _run_image(task_id):
             if record is None:
                 return
         store.update(task_id, downloading=True)
-        files = download_images(record.get("request_id") or task_id, record.get("result_urls") or [],
-                                image_format(record.get("parameters")))
-        store.update(task_id, files=files, downloading=False, polling=False)
+        files, folder, note = download_images(record.get("request_id") or task_id, record.get("result_urls") or [],
+                                              image_format(record.get("parameters")))
+        store.update(task_id, files=files, dir=folder_field(folder), notice=note, downloading=False, polling=False)
     except _TaskRemoved:
         pass
     except gmi_image.RequestFailed as e:
@@ -888,8 +929,8 @@ def _run_part(task_id, index, key):
                 fields["usage"] = usage
             save(**fields)
             part = current()
-        files = download_images(part["request_id"], part["result_urls"], image_format(part["parameters"]))
-        save(files=files, error="")
+        files, folder, note = download_images(part["request_id"], part["result_urls"], image_format(part["parameters"]))
+        save(files=files, dir=folder_field(folder), notice=note, error="")
     except _TaskRemoved:
         pass
     except gmi_image.RequestFailed as e:
@@ -920,8 +961,9 @@ def _record_access(task_id):
 
 
 def _part_access(task_id, index):
-    """多張任務的第 index 張：current() 是那張的紀錄（request_id、submitted_at、status、files…）加上整筆共用的
-    model、payload、parameters、created_at；save(**fields) 只更新那張，順便整理整筆的 files（照張的順序）和進度。"""
+    """多張任務的第 index 張：current() 是那張的紀錄（request_id、submitted_at、status、files、dir…）加上整筆共用的
+    model、payload、parameters、created_at；save(**fields) 只更新那張，順便整理整筆的 files（照張的順序）、進度，
+    和輸出資料夾不能用時的提醒（notice）。"""
     def current():
         record = store.get(task_id)
         if record is None:
@@ -935,7 +977,7 @@ def _part_access(task_id, index):
             parts[index] = {**parts[index], **fields}
             done = sum(1 for p in parts if p.get("files") or p.get("status") in FAILED)
             return {"parts": parts, "files": [f for p in parts for f in p.get("files") or []],
-                    "progress": f"{done}/{len(parts)} 張"}
+                    "progress": f"{done}/{len(parts)} 張", "notice": next((p["notice"] for p in parts if p.get("notice")), "")}
         if store.mutate(task_id, apply) is None:
             raise _TaskRemoved
     return current, save
@@ -1035,19 +1077,120 @@ def image_format(parameters):
     return parameters.get("output_format") or parameters.get("image_output_format")
 
 
+def output_dir():
+    """選項的輸出資料夾（沒選過是專案的 outputs/）。"""
+    custom = _settings.get("outputs_dir")
+    return Path(custom) if custom else OUTPUTS
+
+
+def folder_field(folder):
+    """任務紀錄的 dir 欄位：檔案存在專案的 outputs/ 時不記（專案資料夾搬了也找得到），其他資料夾記完整路徑。"""
+    return None if folder == OUTPUTS else str(folder)
+
+
+def folder_error(e):
+    """資料夾不能用的原因，給使用者看的。"""
+    if isinstance(e, FileNotFoundError):
+        return "找不到資料夾，可能是外接硬碟沒接上，或資料夾被移走了"
+    if isinstance(e, PermissionError):
+        return "沒有權限寫入"
+    if isinstance(e, (FileExistsError, NotADirectoryError)):
+        return "同名的項目不是資料夾"
+    return e.strerror or str(e)
+
+
+def fallback_note(folder, e):
+    return f"輸出資料夾 {folder} 無法使用（{folder_error(e)}），這次存到專案的 outputs/"
+
+
+def ensure_folder(folder):
+    """資料夾不存在就建立：上一層要已經存在，外接硬碟沒接上時才不會建到別的地方。同名的不是資料夾、沒有權限時丟 OSError。
+    用 stat 判斷而不用 is_dir()：沒有權限時 is_dir() 在某些 Python 版本會回傳 False，被當成不存在。"""
+    try:
+        mode = folder.stat().st_mode
+    except FileNotFoundError:
+        folder.mkdir()
+        return
+    if not stat.S_ISDIR(mode):
+        raise NotADirectoryError(str(folder))
+
+
+def save_folder():
+    """現在下載的影片、圖片要存到哪裡，回傳 (資料夾, 提醒)：選項的輸出資料夾不能用時（外接硬碟沒接上…）改存專案的 outputs/。
+    生成結果的網址會過期，不能因為資料夾的問題就讓付過錢的結果下載失敗。"""
+    folder = output_dir()
+    if folder == OUTPUTS:
+        return OUTPUTS, ""
+    try:
+        ensure_folder(folder)  # 資料夾被刪掉了就重新建立
+    except OSError as e:
+        return OUTPUTS, fallback_note(folder, e)
+    return folder, ""
+
+
+def save_output(save):
+    """save(資料夾) 把檔案存進資料夾並回傳結果；回傳 (結果, 資料夾, 提醒)。
+    存不進選項的輸出資料夾時（沒有權限、磁碟滿了…）改存專案的 outputs/，提醒記在任務上。"""
+    folder, note = save_folder()
+    try:
+        return save(folder), folder, note
+    except OSError as e:
+        if folder == OUTPUTS or isinstance(e, requests.RequestException):  # 下載本身失敗（requests 的錯誤也是 OSError）
+            raise
+        return save(OUTPUTS), OUTPUTS, fallback_note(folder, e)
+
+
+def recorded_folder(task, name):
+    """存檔時記下的資料夾：多張的任務記在每一張（parts），其他記在任務上；沒記的是專案的 outputs/。"""
+    for part in task.get("parts") or []:
+        if name in (part.get("files") or []):
+            return Path(part["dir"]) if part.get("dir") else OUTPUTS
+    return Path(task["dir"]) if task.get("dir") else OUTPUTS
+
+
+def locate(task, name):
+    """任務的檔案在哪裡（找不到是 None）：先找存檔時記下的資料夾，再找目前的輸出資料夾和專案的 outputs/，
+    使用者自己把舊檔案搬到新的輸出資料夾也找得到。"""
+    for folder in dict.fromkeys((recorded_folder(task, name), output_dir(), OUTPUTS)):
+        path = folder / name
+        try:
+            if path.is_file():
+                return path
+        except OSError:  # 沒有權限、網路磁碟斷線…
+            pass
+    return None
+
+
+def find_output(rel):
+    """網頁用 /outputs/<rel> 取的檔案（找不到是 None）：專案 outputs/ 裡的（素材副本、存在預設資料夾的結果），
+    或存在其他輸出資料夾的任務檔案（只給任務紀錄裡有的檔名）。"""
+    target = (OUTPUTS / rel).resolve()
+    if target.is_relative_to(OUTPUTS.resolve()) and target.is_file():
+        return target
+    if rel and not re.search(r"[\\/:]", rel):
+        for task in store.all():
+            if rel == task.get("file") or rel in (task.get("files") or []):
+                return locate(task, rel)
+    return None
+
+
 def download_images(base, urls, fmt=None):
-    """把一個請求生成的圖片存到 outputs/，檔名用 GMI 的 request_id（一次多張時加 -1、-2…）；已經下載過的不重下。"""
+    """把一個請求生成的圖片存到輸出資料夾，檔名用 GMI 的 request_id（一次多張時加 -1、-2…）；已經下載過的不重下。
+    回傳 (檔名, 資料夾, 提醒)，見 save_output。"""
     base = safe_name(base)
-    files = []
-    for i, url in enumerate(urls, 1):
-        stem = base if len(urls) == 1 else f"{base}-{i}"
-        path = next((p for p in (OUTPUTS / f"{stem}.{ext}" for ext in ("png", "jpg", "webp")) if p.exists()), None)
-        if not path:
-            if urlparse(url).scheme not in ("http", "https"):
-                raise RuntimeError(f"圖片網址不正確：{url[:300]}")
-            path = gmi_image.download(url, OUTPUTS, stem, fmt)
-        files.append(path.name)
-    return files
+
+    def save(folder):
+        files = []
+        for i, url in enumerate(urls, 1):
+            stem = base if len(urls) == 1 else f"{base}-{i}"
+            path = next((p for p in (folder / f"{stem}.{ext}" for ext in ("png", "jpg", "webp")) if p.exists()), None)
+            if not path:
+                if urlparse(url).scheme not in ("http", "https"):
+                    raise RuntimeError(f"圖片網址不正確：{url[:300]}")
+                path = gmi_image.download(url, folder, stem, fmt)
+            files.append(path.name)
+        return files
+    return save_output(save)
 
 
 def task_spec(task_id):
@@ -1139,11 +1282,12 @@ def _poll(task_id):
             store.update(task_id, finished_at=time.time())
         if urlparse(video_url).scheme not in ("http", "https"):
             raise RuntimeError(f"任務成功但沒有有效的影片網址：{video_url[:300]}")
-        path = OUTPUTS / f"{safe_name(task_id)}.mp4"
-        if not path.exists():
+        name = f"{safe_name(task_id)}.mp4"
+        path, note = locate(record, name), record.get("notice") or ""
+        if path is None:
             store.update(task_id, downloading=True)
-            mixroute_video.download(video_url, path)
-        store.update(task_id, file=path.name, downloading=False, polling=False)
+            path, _, note = save_output(lambda folder: mixroute_video.download(video_url, folder / name))
+        store.update(task_id, file=name, dir=folder_field(path.parent), notice=note, downloading=False, polling=False)
     except _TaskRemoved:
         pass
     except TimeoutError:
@@ -1183,10 +1327,10 @@ def resume_pending(provider=None):
             continue
         if task.get("status") in FAILED:
             continue
-        if task.get("file") and (OUTPUTS / task["file"]).exists():
+        if task.get("file") and locate(task, task["file"]):
             continue
         files = task.get("files")  # 圖片任務；多張的任務做到一半時也有 files，要等狀態是成功才算完成
-        if files and all((OUTPUTS / f).exists() for f in files) and task.get("status") == "SUCCESS":
+        if files and task.get("status") == "SUCCESS" and all(locate(task, f) for f in files):
             continue
         start_poller(task["task_id"])
 
@@ -1207,6 +1351,8 @@ def idle_watchdog(server, idle):
 
 
 def valid_setting(name, value):
+    if name == "outputs_dir":
+        return value is None or (isinstance(value, str) and os.path.isabs(value))
     choices = SETTING_CHOICES.get(name)
     return choices is not None and type(value) is type(choices[0]) and value in choices
 
@@ -1222,11 +1368,164 @@ def load_settings():
         print(f"讀不懂 {SETTINGS_FILE.name}（{e}），先用預設的選項")
         return settings
     if isinstance(saved, dict):
-        settings.update((k, v) for k, v in saved.items() if k not in SETTING_CHOICES or valid_setting(k, v))
+        settings.update((k, v) for k, v in saved.items() if k not in DEFAULT_SETTINGS or valid_setting(k, v))
     return settings
 
 
+def probe_write(folder):
+    """在資料夾裡建一個暫存檔再刪掉，確定寫得進去（macOS 的「桌面」「文件」等資料夾第一次寫入時會詢問權限）。"""
+    probe = folder / f".video_ui-{uuid.uuid4().hex[:8]}.tmp"
+    probe.write_bytes(b"")
+    probe.unlink()
+
+
+def no_permission_text(folder):
+    text = f"沒有權限寫入 {folder}"
+    if sys.platform == "darwin":
+        text += ("。在「桌面」「文件」「下載項目」、iCloud 雲碟或外接硬碟裡的資料夾，macOS 會先詢問能不能取用，拒絕過的話請到"
+                 "「系統設定 › 隱私權與安全性 › 檔案與檔案夾」允許「AI 影片生成」（從終端機啟動的是「終端機」），或改選其他資料夾")
+    return text
+
+
+def check_output_folder(value):
+    """使用者選的輸出資料夾：整理成完整路徑，確定能用（不存在就建立，上一層要已經存在；要寫得進去）。
+    None 或選了專案的 outputs/ 就是預設，回傳 None。"""
+    if value is None:
+        return None
+    text = value.strip() if isinstance(value, str) else ""
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":  # Windows 的「複製路徑」會加上引號
+        text = text[1:-1].strip()
+    if not text:
+        raise ValueError("請輸入資料夾路徑")
+    text = os.path.expanduser(text)
+    if not os.path.isabs(text):
+        example = "D:\\AI 影片" if os.name == "nt" else str(Path.home() / "Movies" / "AI 影片")
+        raise ValueError(f"請輸入完整路徑，例如 {example}")
+    folder = Path(os.path.normpath(text))
+    try:
+        try:
+            folder.stat()
+        except FileNotFoundError:
+            if not folder.parent.is_dir():
+                raise ValueError(f"找不到 {folder.parent}，請選已經存在的資料夾") from None
+        ensure_folder(folder)
+        if os.path.samefile(folder, OUTPUTS):
+            return None
+        probe_write(folder)
+    except PermissionError:
+        raise ValueError(no_permission_text(folder)) from None
+    except OSError as e:
+        raise ValueError(f"無法使用 {folder}：{folder_error(e)}") from None
+    return str(folder)
+
+
+def folder_problem(folder):
+    """輸出資料夾現在能不能用：能用是空字串，不能用是原因（這時新的檔案先存到專案的 outputs/）。
+    資料夾被刪掉、上一層還在的話，下次存檔時會重新建立，也算能用。"""
+    try:
+        if not stat.S_ISDIR(folder.stat().st_mode):
+            return folder_error(NotADirectoryError())
+        probe_write(folder)
+        return ""
+    except FileNotFoundError:
+        try:
+            if folder.parent.is_dir():
+                return ""
+        except OSError:
+            pass
+        return folder_error(FileNotFoundError())
+    except OSError as e:
+        return folder_error(e)
+
+
+def storage_status():
+    """選項頁「輸出資料夾」的狀態。"""
+    custom = _settings.get("outputs_dir")
+    return {"dir": custom or str(OUTPUTS), "default": str(OUTPUTS), "custom": custom,
+            "problem": folder_problem(Path(custom)) if custom else "", "picker": picker_command(OUTPUTS) is not None}
+
+
+def picker_command(start):
+    """跳出系統選擇資料夾視窗的 (指令, 要加的環境變數, 表示「按了取消」的結束代碼, 路徑是否 base64)；這台電腦沒有可用的是 None。
+    macOS、Windows 按取消時正常結束、不輸出；Linux 的 zenity、kdialog 按取消時結束代碼是 1。"""
+    if sys.platform == "darwin":
+        return ["osascript", "-l", "JavaScript", "-e", MAC_PICKER, PICK_PROMPT, "選擇", str(start)], {}, (), False
+    if os.name == "nt":
+        script = base64.b64encode(WIN_PICKER.encode("utf-16-le")).decode()
+        env = {"VIDEO_UI_PICK_PROMPT": PICK_PROMPT, "VIDEO_UI_PICK_START": str(start)}
+        return ["powershell.exe", "-NoProfile", "-STA", "-EncodedCommand", script], env, (), True
+    if shutil.which("zenity"):
+        return ["zenity", "--file-selection", "--directory", f"--title={PICK_PROMPT}", f"--filename={start}/"], {}, (1,), False
+    if shutil.which("kdialog"):
+        return ["kdialog", "--title", PICK_PROMPT, "--getexistingdirectory", str(start)], {}, (1,), False
+    return None
+
+
+def pick_folder():
+    """跳出系統的選擇資料夾視窗並等使用者選好：回傳選的資料夾，按了取消（或選項頁按了取消）是 None。"""
+    global _picker
+    start = output_dir()
+    try:
+        start = start if start.is_dir() else OUTPUTS
+    except OSError:
+        start = OUTPUTS
+    command = picker_command(start)
+    if not command:
+        raise ValueError("這台電腦沒辦法跳出選擇資料夾的視窗，請直接輸入資料夾路徑")
+    argv, env, cancel_codes, encoded = command
+    with _picker_lock:
+        if _picker and _picker.poll() is None:
+            raise ValueError("選擇資料夾的視窗已經開著了，可能被其他視窗擋住")
+        try:
+            # Windows 的伺服器在背景執行（沒有主控台），不加 CREATE_NO_WINDOW 會多跳一個黑色視窗
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    env={**os.environ, **env} if env else None,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError as e:
+            raise ValueError(f"無法打開選擇資料夾的視窗（{e.strerror or e}），請直接輸入資料夾路徑") from None
+        proc.canceled = False
+        _picker = proc
+    out, err = proc.communicate()
+    with _picker_lock:
+        if _picker is proc:
+            _picker = None
+    lines = out.decode("utf-8", "replace").strip().splitlines()
+    text = lines[-1].strip() if lines else ""
+    if proc.canceled or proc.returncode in cancel_codes or (proc.returncode == 0 and not text):
+        return None
+    if proc.returncode:
+        detail = err.decode("utf-8", "replace").strip()[-300:] or f"結束代碼 {proc.returncode}"
+        raise ValueError(f"選擇資料夾的視窗出了問題（{detail}），請直接輸入資料夾路徑")
+    if encoded:
+        try:
+            text = base64.b64decode(text, validate=True).decode("utf-8")
+        except ValueError:
+            raise ValueError("讀不懂選擇資料夾的視窗傳回的路徑，請直接輸入資料夾路徑") from None
+    return text
+
+
+def cancel_picker():
+    """關掉開著的選擇資料夾視窗：選項頁按了取消，或伺服器要結束了。"""
+    with _picker_lock:
+        proc = _picker
+        if proc and proc.poll() is None:
+            proc.canceled = True
+            proc.terminate()
+
+
+def reveal(path, select=True):
+    """在 Finder／檔案總管顯示：select 為真時選取這個檔案，不然打開這個資料夾。"""
+    if sys.platform == "darwin":
+        subprocess.run(["open", "-R", str(path)] if select else ["open", str(path)], check=False)
+    elif sys.platform == "win32":
+        subprocess.run(["explorer", "/select,", str(path)] if select else ["explorer", str(path)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(path.parent if select else path)], check=False)
+
+
 def save_settings(changes):
+    if "outputs_dir" in changes:  # 先確定資料夾能用；macOS 可能要等使用者回答要不要允許取用，不在鎖裡做
+        changes = {**changes, "outputs_dir": check_output_folder(changes["outputs_dir"])}
     with _settings_lock:
         new = dict(_settings)
         for name, value in changes.items():
@@ -1340,9 +1639,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/tasks":
                 # 選項也一起帶回去：在別的分頁或瀏覽器改了（例如關掉通知），開著的網頁跟著更新
                 return self._send_json({"tasks": store.all(), "now": time.time(), "settings": _settings})
+            if path == "/api/outputs-dir":
+                return self._send_json({"storage": storage_status()})
             if path.startswith("/outputs/"):
-                target = (OUTPUTS / unquote(path[len("/outputs/"):])).resolve()
-                if target.is_relative_to(OUTPUTS.resolve()) and target.is_file():
+                # 生成的檔案不一定在專案的 outputs/（選項可以換輸出資料夾），網址一樣是 /outputs/<檔名>，由 find_output 找
+                target = find_output(unquote(path[len("/outputs/"):]))
+                if target:
                     return self._send_file(target, head=method == "HEAD")
             return self._send_json({"error": "not found"}, 404)
 
@@ -1357,6 +1659,23 @@ class Handler(BaseHTTPRequestHandler):
                                     "prices": _prices})
         if method == "POST" and path == "/api/settings":
             return self._send_json({"settings": save_settings(self._read_json())})
+        if method == "POST" and path == "/api/outputs-dir":
+            # 選項的輸出資料夾：{"pick": true} 跳出系統的選擇資料夾視窗（等使用者選好才回應）；{"cancel": true} 關掉那個視窗；
+            # {"path": "…"} 直接指定路徑，null 是改回專案的 outputs/
+            body = self._read_json()
+            if body.get("cancel"):
+                cancel_picker()
+                return self._send_json({"ok": True})
+            if body.get("pick"):
+                chosen = pick_folder()
+                if chosen is None:
+                    return self._send_json({"canceled": True, "settings": _settings, "storage": storage_status()})
+            elif "path" in body:
+                chosen = body["path"]
+            else:
+                raise ValueError("請選擇或輸入資料夾")
+            settings = save_settings({"outputs_dir": chosen})
+            return self._send_json({"settings": settings, "storage": storage_status()})
         if method == "POST" and path == "/api/update":
             apply = bool(self._read_json().get("apply"))
             waiting = apply and image_waiting()
@@ -1415,15 +1734,19 @@ class Handler(BaseHTTPRequestHandler):
                 store.remove(task_id)  # 只移除紀錄，不刪影片檔
                 return self._send_json({"ok": True})
         if method == "POST" and path == "/api/reveal":
-            target = (OUTPUTS / str(self._read_json().get("file") or "")).resolve()
-            if not (target.is_relative_to(OUTPUTS.resolve()) and target.exists()):
-                raise ValueError("找不到檔案")
-            if sys.platform == "darwin":
-                subprocess.run(["open", "-R", str(target)], check=False)
-            elif sys.platform == "win32":
-                subprocess.run(["explorer", "/select,", str(target)], check=False)
-            else:
-                subprocess.run(["xdg-open", str(target.parent)], check=False)
+            body = self._read_json()
+            if body.get("folder"):  # 選項的「打開」：輸出資料夾（被刪掉了就重新建立）
+                folder = output_dir()
+                try:
+                    ensure_folder(folder)
+                except OSError as e:
+                    raise ValueError(f"無法打開 {folder}：{folder_error(e)}") from None
+                reveal(folder, select=False)
+                return self._send_json({"ok": True})
+            target = find_output(str(body.get("file") or ""))
+            if not target:
+                raise ValueError("找不到檔案，可能被移走或刪除了")
+            reveal(target)
             return self._send_json({"ok": True})
         self._send_json({"error": "not found"}, 404)
 
@@ -1603,6 +1926,7 @@ def main():
         print("\n已關閉。未完成的任務下次啟動會接著查詢。")
     finally:
         server.server_close()
+        cancel_picker()  # 選擇資料夾的視窗還開著的話一起關掉，不留在畫面上
     if _restart_status:
         restart(_restart_status, no_browser=True)
 
