@@ -1716,9 +1716,14 @@ const QUALITY_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 const imageEndpoint = () => itemsOf('image').length ? 'edit' : 'generate';
 // 這個端點收哪些選用參數。還沒重開的舊伺服器送來的模型清單沒有 extra_params（那時只有 2.5，全部都收）
 const extraParams = (s, endpoint) => s.extra_params?.[endpoint] ?? ['output_format', 'output_compression', 'background', 'moderation'];
+// 張數在 payload 裡的名稱；null＝模型一次只生成一張（Gemini、Seedream），伺服器把同一個請求送出「張數」次。
+// 舊版伺服器的模型清單沒有 n_param，那時有張數的都是 GPT Image 的 n
+const nParam = s => 'n_param' in s ? s.n_param : 'n';
+const multiRequest = s => !!s.n && nParam(s) === null;
 // 這次實際會送出的圖片參數：只放這個模型、這個端點收的參數（extra_params）。和影片一樣不改掉使用者選的值，
 // 例如選了透明背景又改成 JPEG、或換到沒有「最高」品質的模型，只在送出時換成可用的值，並在 notes 說明。
-// 尺寸：指定寬高的模型送 size；Gemini 送 aspect_ratio 和 image_size。沒有品質（qualities 空的）、張數（n 是 null）的模型不送
+// 尺寸：指定寬高的模型送 size；Gemini 送 aspect_ratio 和 image_size。沒有品質（qualities 空的）的模型不送品質。
+// count 是張數：GPT Image 放進 payload 的 n，一次只生成一張的模型由伺服器送出 count 個請求
 function effectiveImageParams(s = IM()) {
   const p = state.imageParams, d = s.defaults, size = imageSize(s), { w, h, notes } = size;
   const endpoint = imageEndpoint(), extra = extraParams(s, endpoint);
@@ -1733,8 +1738,9 @@ function effectiveImageParams(s = IM()) {
     }
     params.quality = quality;
   }
-  if (s.n) params.n = int(p.n, s.n.min, s.n.max, d.n);
-  else if (Number(p.n) > 1) notes.push(`${s.label} 一次只能生成 1 張，這次生成 1 張`);
+  const count = s.n ? int(p.n, s.n.min, s.n.max, d.n ?? 1) : 1;
+  if (s.n && nParam(s)) params[nParam(s)] = count;
+  else if (!s.n && Number(p.n) > 1) notes.push(`${s.label} 一次只能生成 1 張，這次生成 1 張`);
   let format = 'png';  // 不收 output_format 的端點輸出 PNG
   if (extra.includes('output_format')) {
     format = s.formats.includes(p.format) ? p.format : d.output_format;
@@ -1760,7 +1766,7 @@ function effectiveImageParams(s = IM()) {
   }
   if (extra.includes('watermark')) params.watermark = !!p.watermark;
   else if (p.watermark) notes.push(`${s.label} 不能加 AI 浮水印，這次不會加`);
-  return { params, notes, w, h, tier: size.tier, format, endpoint };
+  return { params, notes, w, h, tier: size.tier, format, endpoint, count };
 }
 // 每張的價格（美元），p 是送出的參數。pixels：1024×1024 的價格按像素數換算；sizes：只有列出來的尺寸有價格，其他是 null；
 // tiers：看解析度（image_size）；flat：不分尺寸
@@ -1780,7 +1786,8 @@ function imageCost(s, e) {
   if (per == null) return null;
   const refs = e.endpoint === 'edit' ? Math.min(itemsOf('image').length, limitOf('image', s)) : 0;
   const text = s.token_prices ? new TextEncoder().encode(state.prompt.trim()).length / 3 * s.token_prices.text / 1e6 : 0;
-  return { per, refs, total: per * (e.params.n || 1) + refs * s.ref_price + text };
+  const requests = multiRequest(s) ? e.count : 1;  // 參考圖和提示詞每個請求各算一次
+  return { per, refs, total: per * e.count + (refs * s.ref_price + text) * requests };
 }
 // 按尺寸計價的模型：這個品質有公開價格的尺寸，例如「1024×1024 $0.06、1024×1536／1536×1024 $0.12」
 function knownPrices(s, quality) {
@@ -1801,7 +1808,9 @@ function imageUsageText(t) {
     cost = ((inp.text_tokens || 0) * tp.text + (inp.image_tokens || 0) * tp.image + (out.image_tokens ?? u.output_tokens ?? 0) * tp.output) / 1e6;
   } else if (String(t.status).toUpperCase() === 'SUCCESS') {  // 失敗的請求 GMI 不收費
     const per = imagePrice(s, p), refs = (t.media || []).filter(m => m.type === 'reference_image').length;
-    if (per != null) cost = per * (taskFiles(t).length || p.n || 1) + refs * (s.ref_price || 0);
+    // 多張的任務（parts）只算成功的請求，參考圖每個請求各算一次
+    const requests = t.parts ? t.parts.filter(x => (x.files || []).length).length : 1;
+    if (per != null) cost = per * (taskFiles(t).length || p.n || 1) + refs * (s.ref_price || 0) * requests;
   }
   // OpenAI 的用量才有 input_tokens；BytePlus（Seedream）的用量只有 output_tokens 和張數，不顯示
   const tokens = u?.input_tokens != null
@@ -1855,8 +1864,8 @@ function renderImageParams() {
   $('#imgNLabel').hidden = $('#imgNBox').hidden = !s.n;
   if (s.n) {
     for (const el of [$('#imgNRange'), $('#imgNNum')]) { el.min = s.n.min; el.max = s.n.max; }
-    $('#imgNRange').value = e.params.n;
-    if (document.activeElement !== $('#imgNNum')) $('#imgNNum').value = e.params.n;
+    $('#imgNRange').value = e.count;
+    if (document.activeElement !== $('#imgNNum')) $('#imgNNum').value = e.count;
   }
   // 這個端點不收 output_format（GPT Image 2 改圖）：只能 PNG，其他格式停用
   const extra = extraParams(s, e.endpoint);
@@ -1981,6 +1990,9 @@ function collectImageIssues() {
   add('info', items.length
     ? `有 ${items.length} 張參考圖，這次用 ${s.edit}，照提示詞${items.length > 1 ? '修改或合成這些參考圖' : '修改這張參考圖'}`
     : `沒有參考圖，這次用 ${s.generate}（文字生圖）`);
+  if (multiRequest(s) && e.count > 1) {
+    add('info', `${s.label} 一次只生成 1 張：${e.count} 張會分成 ${e.count} 個相同的請求在背景送出，結果放在同一個任務`);
+  }
   const seen = new Set();
   for (const m of prompt.matchAll(/(图片|圖片|图|圖|image\s*)(\d+)/gi)) {
     if (Number(m[2]) > items.length && !seen.has(m[0])) {
@@ -1996,8 +2008,8 @@ function collectImageIssues() {
   } else if (cost) {
     const what = ratioSizing(s) ? `${e.params.aspect_ratio}、${e.params.image_size}（${e.w}×${e.h}）`
       : `${e.w}×${e.h}${e.params.quality ? `、品質 ${e.params.quality}` : ''} `;
-    add('info', `${P().label} 預估費用：${what}約 ${fmtUsd(cost.per)}／張 × ${e.params.n || 1} 張`
-      + (cost.refs && s.ref_price ? ` ＋ 參考圖 ${cost.refs} 張` : '') + ` ≈ ${fmtUsd(cost.total)}`
+    const refs = cost.refs && s.ref_price ? ` ＋ 參考圖 ${cost.refs} 張${multiRequest(s) && e.count > 1 ? ` × ${e.count} 個請求` : ''}` : '';
+    add('info', `${P().label} 預估費用：${what}約 ${fmtUsd(cost.per)}／張 × ${e.count} 張${refs} ≈ ${fmtUsd(cost.total)}`
       + (['sizes', 'tiers', 'flat'].includes(s.price_rule) ? '（GMI 公布的每張價格）' : '（建立請求時預扣，預扣的就是實際費用）'));
   } else if (s.price_rule === 'sizes') {
     add('warn', `GMI 沒有公開 ${s.label} ${e.w}×${e.h} 的價格，實際費用請到 GMI 後台確認`
@@ -2026,9 +2038,11 @@ function mediaOf(it) {
 }
 function buildRequest() {
   if (isImage()) {  // 模型送 image_models.py 的 id，伺服器依有沒有參考圖選 generate 或 edit
-    const s = IM();
-    return { kind: 'image', provider: s.provider, model: s.id, prompt: state.prompt.trim(),
-      parameters: effectiveImageParams(s).params, media: activeItems().map(mediaOf) };
+    const s = IM(), e = effectiveImageParams(s);
+    const req = { kind: 'image', provider: s.provider, model: s.id, prompt: state.prompt.trim(),
+      parameters: e.params, media: activeItems().map(mediaOf) };
+    if (multiRequest(s)) req.count = e.count;  // 一次只生成一張的模型：伺服器把同一個請求送出 count 次
+    return req;
   }
   const s = M();
   const req = {
@@ -2050,7 +2064,10 @@ function renderPreview() {
   previewTimer = setTimeout(async () => {
     const mine = ++previewSeq;
     let text;
-    try { text = JSON.stringify((await api('/api/preview', { method: 'POST', json: buildRequest() })).request, null, 2); }
+    try {
+      const res = await api('/api/preview', { method: 'POST', json: buildRequest() });
+      text = (res.count > 1 ? `// 同一個請求送出 ${res.count} 次，每次生成 1 張\n` : '') + JSON.stringify(res.request, null, 2);
+    }
     catch (e) { text = '（還不能送出：' + e.message + '）'; }
     if (mine === previewSeq) $('#previewBox').textContent = text;
   }, 200);
@@ -2127,8 +2144,10 @@ function taskChips(t) {
     // GPT Image 看模型 ID（…-edit）；Gemini、Seedream 改圖和文字生圖是同一個 ID，看有沒有參考圖
     const edit = /-edit$/.test(t.model || '') || (t.media || []).some(m => m.type === 'reference_image');
     const parts = [providerLabel, imageSpecOf(t)?.label || t.model, edit ? '改圖' : '文字生圖'];
-    if (p.size) parts.push(p.size.replace('x', '×'), p.quality && `品質 ${p.quality}`, imageSpecOf(t)?.n && `${p.n || 1} 張`, FORMAT_LABEL[p.output_format] || p.output_format);
-    else if (p.image_size) parts.push(p.aspect_ratio, p.image_size, FORMAT_LABEL[p.image_output_format] || p.image_output_format);
+    // 張數：GPT Image 在 n；一次只生成一張的模型記在 count（多張時每張各是 parts 裡的一個請求）
+    const count = imageSpecOf(t)?.n && `${p.n || t.count || t.parts?.length || 1} 張`;
+    if (p.size) parts.push(p.size.replace('x', '×'), p.quality && `品質 ${p.quality}`, count, FORMAT_LABEL[p.output_format] || p.output_format);
+    else if (p.image_size) parts.push(p.aspect_ratio, p.image_size, count, FORMAT_LABEL[p.image_output_format] || p.image_output_format);
     if (p.background && p.background !== 'auto') parts.push(`${BG_LABEL[p.background] || p.background}背景`);
     if (p.moderation === 'low') parts.push('寬鬆審核');
     if (p.watermark) parts.push('AI 浮水印');
@@ -2172,11 +2191,13 @@ function buildTask(t) {
   if (!t.imported || t.prompt || (t.media || []).length) {
     actions.push(h('button', { class: 'btn small', type: 'button', text: '重用設定', title: '把模型、提示詞、參數和素材載入到左邊', onclick: () => reuseTask(t) }));
   }
-  if (!busy && !files.length && !FAILED.has(String(t.status).toUpperCase())) {
+  // 多張的任務（parts）：有張還沒完成（不是成功也不是失敗）就能「重新查詢」接著查，即使已經有幾張圖了
+  const unfinished = t.parts ? t.parts.some(x => !(x.files || []).length && !FAILED.has(String(x.status || '').toUpperCase())) : !files.length;
+  if (!busy && unfinished && !FAILED.has(String(t.status).toUpperCase())) {
     actions.push(h('button', { class: 'btn small', type: 'button', text: '重新查詢', onclick: () => taskAction(t, 'refresh') }));
   }
-  // 圖片任務生成完才有 GMI 的 request_id，在那之前只有本機的 ID，複製了也查不到
-  const shownId = image ? t.request_id : t.task_id;
+  // 圖片任務生成完才有 GMI 的 request_id，在那之前只有本機的 ID，複製了也查不到；多張的任務每張各有一個
+  const shownId = image ? (t.parts ? t.parts.map(x => x.request_id).filter(Boolean).join(', ') : t.request_id) : t.task_id;
   if (shownId) actions.push(h('button', { class: 'btn small', type: 'button', text: '複製 ID', onclick: () => copyText(shownId) }));
   actions.push(h('button', { class: 'btn small danger', type: 'button', text: '移除', onclick: () => taskAction(t, 'remove') }));
   return h('article', { class: 'task', 'data-id': t.task_id },
@@ -2203,7 +2224,7 @@ function renderTasks() {
   for (const [id, cached] of taskNodes) if (!ids.has(id)) { cached.node.remove(); taskNodes.delete(id); }
   let prev = null;
   for (const t of tasks) {  // 新的在上面；舊卡片不搬動，播放中的影片才不會被打斷
-    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.error, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, (t.media || []).length, state.platform]);
+    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.parts, t.error, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, (t.media || []).length, state.platform]);
     let cached = taskNodes.get(t.task_id);
     if (!cached || cached.sig !== sig) {
       const node = buildTask(t);
@@ -2332,6 +2353,7 @@ function reuseImageTask(t) {
   state.prompt = t.prompt || '';
   const p = t.parameters || {};
   if (p.size || p.image_size) state.imageParams = imageParamsFrom(p, spec);
+  if (multiRequest(spec)) state.imageParams.n = t.count || t.parts?.length || 1;  // 張數不在參數裡
   itemsOf('image').forEach(it => removeItem(it.id, true));
   for (const m of t.media || []) {
     if (m.type !== 'reference_image') continue;

@@ -27,7 +27,9 @@ Seedream 5.0 Pro 也只有一個 ID，尺寸和 GPT Image 一樣送寬x高，是
 - extra_params：除了 prompt、image、尺寸、quality、n 以外，generate／edit 各收哪些參數（output_format、output_compression、
   background、moderation、watermark）；沒列的不送，網頁上會說明這次用什麼。format_param：輸出格式在 payload 裡的名稱。
 - formats：輸出格式；transparent_formats：能輸出透明背景的格式；backgrounds、moderation：可選的值（空的＝不支援）；
-  n：一次生成幾張（None＝沒有這個參數，一次一張）；defaults：「恢復預設」和模型不支援使用者的選擇時用的值。
+  n：網頁上「張數」的範圍；n_param：張數在 payload 裡的名稱，None＝模型一次只生成一張，
+  伺服器把同一個請求送出「張數」次（見 video_ui.py 的 _run_image_parts）；
+  defaults：「恢復預設」和模型不支援使用者的選擇時用的值。
 - price_rule、prices：每張的價格（美元）。"pixels"：prices 是 1024×1024 的價格，其他尺寸按像素數等比例換算；
   "sizes"：prices 是「寬x高（小的在前）→ 品質 → 價格」，沒列的尺寸 GMI 接受但沒有公開價格；
   "tiers"：prices 是「解析度 → 價格」；"flat"：不分尺寸，prices 只有 {"image": 每張的價格}。
@@ -51,7 +53,7 @@ GPT_IMAGE = {
     "sizing": "pixels", "size": SIZE,
     "ratios": ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9"],
     "tiers": {"1K": {"pixels": 1024 * 1024}, "2K": {"long": 2048}, "4K": {"long": 3840}},
-    "n": {"min": 1, "max": 10},
+    "n": {"min": 1, "max": 10}, "n_param": "n",
     "format_param": "output_format",
     "defaults": {"quality": "medium", "n": 1, "output_format": "png", "background": "auto", "moderation": "auto",
                  "output_compression": 100},
@@ -110,7 +112,7 @@ GPT_IMAGE_2 = {
 # - 只有一個 ID：payload 有 image（參考圖網址的陣列，最多 14 張）就是改圖、合成，沒有就是文字生圖。
 # - 不能指定寬高：只收 aspect_ratio（下面 8 種，沒有 2:3、3:2）和 image_size（1K／2K／4K），
 #   實際尺寸照 Google 文件的對照表（_GEMINI_1K；2K、4K 是兩倍、四倍）。
-# - 沒有品質、張數、背景、內容審核的參數；輸出格式的參數叫 image_output_format（PNG／JPEG）。
+# - 沒有品質、張數、背景、內容審核的參數，一次生成一張（多張時送出多個請求）；輸出格式的參數叫 image_output_format（PNG／JPEG）。
 # - 提示詞約 2000 字以內；參考圖每張 ≤ 7 MB（Google 說其中最多 5 張能保留人物的樣子）。
 # - 另有多輪編輯（payload 的 contents，回應的 outcome.next_turn_contents），這裡沒有用。
 # - 價格（pricing_details）：輸出 1K／2K 每張 $0.134、4K 每張 $0.24；每張參考圖另收 $0.0011。
@@ -120,7 +122,7 @@ GEMINI_3_PRO_IMAGE = {
     "kind": "image", "provider": "gmi",
     "id": "gemini-3-pro-image", "label": "Gemini 3 Pro Image",
     "generate": "gemini-3-pro-image", "edit": "gemini-3-pro-image",
-    "summary": "Google 的 Nano Banana Pro：寫實、圖中文字、多張參考圖合成強；不能自訂寬高，一次一張",
+    "summary": "Google 的 Nano Banana Pro：寫實、圖中文字、多張參考圖合成強；不能自訂寬高",
     "prompt_required": True, "prompt_max": 2000,
     "media": {"reference_image": 14}, "media_total": 14,
     "labels": {"image": "Image "},
@@ -131,12 +133,12 @@ GEMINI_3_PRO_IMAGE = {
     "tiers": {"1K": {"pixels": 1024 * 1024}, "2K": {"pixels": 2048 * 2048}, "4K": {"pixels": 4096 * 4096}},
     "tier_sizes": {tier: {r: f"{w * k}x{h * k}" for r, (w, h) in _GEMINI_1K.items()}
                    for tier, k in (("1K", 1), ("2K", 2), ("4K", 4))},
-    "qualities": [], "n": None,
+    "qualities": [], "n": {"min": 1, "max": 10}, "n_param": None,
     "extra_params": {"generate": ["output_format"], "edit": ["output_format"]},
     "format_param": "image_output_format",
     "formats": ["png", "jpeg"], "transparent_formats": [],
     "backgrounds": [], "moderation": [],
-    "defaults": {"output_format": "png"},
+    "defaults": {"output_format": "png", "n": 1},
     "notes": {},
     "price_rule": "tiers",
     "prices": {"1K": 0.134, "2K": 0.134, "4K": 0.24},
@@ -151,14 +153,14 @@ GEMINI_3_PRO_IMAGE = {
 # - 只有一個 ID，image（網址陣列）是選填：有參考圖就是改圖、合成。
 # - 尺寸一律送寬x高：GMI 寫「up to 4.19M」，列出的 2K 尺寸（tier_sizes）都 ≤ 2048×2048，上限就用 4,194,304。
 #   不送 "2K" 這種解析度字串：那樣比例要寫在提示詞裡，由模型決定。1K、1.5K 在 GMI 上價格一樣，先不列。
-# - 沒有品質、背景、內容審核的參數；一次一張；watermark 預設不加（GMI 的預設也是 false）。
+# - 沒有品質、背景、內容審核的參數；一次生成一張（多張時送出多個請求）；watermark 預設不加（GMI 的預設也是 false）。
 # - 非同步（delivery_mode async）：送出後拿到 request_id，再查到完成。GMI 文件寫 sync，兩種都照樣處理。
 # - 價格：每張 $0.085，不分尺寸。
 SEEDREAM_50_PRO = {
     "kind": "image", "provider": "gmi",
     "id": "seedream-5.0-pro", "label": "Seedream 5.0 Pro",
     "generate": "seedream-5.0-pro", "edit": "seedream-5.0-pro",
-    "summary": "字節跳動的新一代生圖模型：畫質高，擅長多張參考圖合成和圖中文字；一次一張",
+    "summary": "字節跳動的新一代生圖模型：畫質高，擅長多張參考圖合成和圖中文字",
     "prompt_required": True, "prompt_max": None,
     "media": {"reference_image": 10}, "media_total": 10,
     "labels": {"image": "Image "},
@@ -171,12 +173,12 @@ SEEDREAM_50_PRO = {
     "tiers": {"2K": {"pixels": 2048 * 2048}},
     "tier_sizes": {"2K": {"1:1": "2048x2048", "4:3": "2352x1760", "3:4": "1760x2352", "3:2": "2496x1664",
                           "2:3": "1664x2496", "16:9": "2720x1536", "9:16": "1536x2720", "21:9": "3120x1344"}},
-    "qualities": [], "n": None,
+    "qualities": [], "n": {"min": 1, "max": 10}, "n_param": None,
     "extra_params": {"generate": ["output_format", "watermark"], "edit": ["output_format", "watermark"]},
     "format_param": "output_format",
     "formats": ["png", "jpeg"], "transparent_formats": [],
     "backgrounds": [], "moderation": [],
-    "defaults": {"output_format": "png", "watermark": False},
+    "defaults": {"output_format": "png", "n": 1, "watermark": False},
     "notes": {},
     "price_rule": "flat",
     "prices": {"image": 0.085},

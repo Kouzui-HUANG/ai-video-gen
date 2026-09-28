@@ -15,7 +15,8 @@
   （改圖、合成）；Gemini、Seedream 只有一個模型 ID，有參考圖就一起送。參數與價格在 image_models.py；
   提示詞和參考圖和影片共用。
   GPT Image 和 Gemini 是同步的：送出後要等圖片生成完 GMI 才回應，所以伺服器先建一筆任務，在背景等結果再下載；
-  Seedream 是非同步的，送出後照影片的方式查到完成。
+  Seedream 是非同步的，送出後照影片的方式查到完成。Gemini、Seedream 一次只生成一張，張數 2 以上時伺服器把
+  同一個請求送出多次，結果放在同一筆任務（見 _run_image_parts）。
 - API key：優先用環境變數 MIXROUTE_API_KEY／GMI_API_KEY，沒有的話在網頁上輸入（只放在伺服器記憶體）。
 - MixRoute：本機圖片在瀏覽器處理後以 base64 直接送出，不經第三方；本機影片、音訊、文件會上傳到
   Litterbox (litterbox.catbox.moe) 取得臨時公開網址，到期自動刪除，期間拿到連結的人都能下載。
@@ -44,6 +45,7 @@ import uuid
 import webbrowser
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -70,6 +72,7 @@ LITTERBOX_TTLS = {"1h": 3600, "12h": 12 * 3600, "24h": 24 * 3600, "72h": 72 * 36
 REUPLOAD_MARGIN = 20 * 60  # 臨時連結剩不到 20 分鐘就重傳，避免任務排隊時連結過期
 POLL_TIMEOUT = 2 * 3600
 IMAGE_TIMEOUT = 15 * 60  # 圖片模型是同步的，送出後要等生成完才回應；max 品質、4K、一次多張時要好幾分鐘
+IMAGE_PARALLEL = 4  # 一次只生成一張的模型要多張時，最多同時送出幾個請求（太多容易被限流）
 
 IMAGE_MIME = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp", "bmp": "image/bmp"}
 MAX_IMAGE_BYTES = 20 << 20
@@ -166,6 +169,16 @@ class TaskStore:
             if task is None or self.closed:  # 已從列表移除，或已經交給重新啟動的新程序
                 return None
             task.update(fields, updated_at=time.time())
+            self._save()
+            return dict(task)
+
+    def mutate(self, task_id, fn):
+        """fn(目前的紀錄) 算出要更新的欄位再寫回，整段在鎖裡：好幾個執行緒同時改同一筆任務（多張圖片任務的每一張）時用。"""
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if task is None or self.closed:
+                return None
+            task.update(fn(dict(task)), updated_at=time.time())
             self._save()
             return dict(task)
 
@@ -651,7 +664,7 @@ def clean_image_parameters(p, spec, endpoint):
         if quality not in spec["qualities"]:  # 不收 auto：GMI 會按 max 計價
             raise ValueError(f"{label} 的品質只能是 {'、'.join(spec['qualities'])}")
         out["quality"] = quality
-    if spec["n"]:  # 沒有 n 的模型一次一張
+    if spec["n_param"]:  # 一次只生成一張的模型（Gemini、Seedream）沒有 n，張數在 prepare_image_request 處理
         try:
             n = int(p.get("n", 1))
         except (TypeError, ValueError):
@@ -659,7 +672,7 @@ def clean_image_parameters(p, spec, endpoint):
         rule = spec["n"]
         if not rule["min"] <= n <= rule["max"]:
             raise ValueError(f"{label} 一次可以生成 {rule['min']}-{rule['max']} 張")
-        out["n"] = n
+        out[spec["n_param"]] = n
     fmt = "png"  # 不收 output_format 的端點輸出 PNG
     if "output_format" in extra:
         name = spec["format_param"]  # Gemini 叫 image_output_format
@@ -694,9 +707,10 @@ def clean_image_parameters(p, spec, endpoint):
 
 
 def prepare_image_request(body, session=None, dry_run=False):
-    """檢查網頁送來的圖片請求並準備參考圖，回傳 (spec, GMI 模型 ID, prompt, parameters, payload, summaries)。
+    """檢查網頁送來的圖片請求並準備參考圖，回傳 (spec, GMI 模型 ID, prompt, parameters, payload, summaries, count)。
 
     有參考圖用 edit，沒有用 generate；參考圖的處理和 GMI 的影片模型一樣（本機檔案上傳到 GMI 的儲存空間）。
+    count 是同一個請求要送出幾次：一次只生成一張的模型（n_param 是 None）靠它生成多張，其他模型一律 1。
     """
     spec = image_spec_of(body.get("model"))
     prompt = str(body.get("prompt") or "").strip()
@@ -705,11 +719,20 @@ def prepare_image_request(body, session=None, dry_run=False):
     items = body.get("media") or []
     if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
         raise ValueError("素材格式不正確")
+    count = 1
+    if spec["n"] and not spec["n_param"]:
+        try:
+            count = int(body.get("count", 1))  # 還沒重新整理的舊網頁不會送 count
+        except (TypeError, ValueError):
+            raise ValueError("張數必須是整數") from None
+        rule = spec["n"]
+        if not rule["min"] <= count <= rule["max"]:
+            raise ValueError(f"{spec['label']} 一次可以生成 {rule['min']}-{rule['max']} 張")
     parameters = clean_image_parameters(body.get("parameters") or {}, spec, "edit" if items else "generate")
     media, summaries = resolve_media(items, spec, session, dry_run)
     model = spec["edit"] if media else spec["generate"]
     payload = gmi_image.build_payload(prompt, parameters, [m["url"] for m in media])
-    return spec, model, prompt, parameters, payload, summaries
+    return spec, model, prompt, parameters, payload, summaries, count
 
 
 def create_image_task(body):
@@ -717,7 +740,7 @@ def create_image_task(body):
     if not key:
         raise ValueError("請先設定 GMI Cloud 的 API key")
     with api_session(key) as s:
-        spec, model, prompt, parameters, payload, summaries = prepare_image_request(body, s)
+        spec, model, prompt, parameters, payload, summaries, count = prepare_image_request(body, s)
     task = {
         # 同步模型要等圖片生成完才拿得到 GMI 的 request_id，先用本機的 ID，request_id 另外記
         "task_id": f"img-{uuid.uuid4().hex[:20]}",
@@ -733,13 +756,18 @@ def create_image_task(body):
         "status": "IN_PROGRESS",
         "progress": "",
     }
+    if not spec["n_param"]:  # 一次只生成一張的模型：記下張數，多張時每張各是一個請求，記在 parts
+        task["count"] = count
+        if count > 1:
+            task.update(parts=[{} for _ in range(count)], progress=f"0/{count} 張")
     record = store.add(task)
     start_poller(task["task_id"])
     return record
 
 
 def _run_image(task_id):
-    """圖片任務：送出並等生成完 → 下載。伺服器重啟或按「重新查詢」時，從還沒完成的步驟接著做。"""
+    """圖片任務：送出並等生成完 → 下載。伺服器重啟或按「重新查詢」時，從還沒完成的步驟接著做。
+    多張的任務（parts）每張各是一個請求，見 _run_image_parts。"""
     record = store.get(task_id)
     if record is None:
         return
@@ -748,18 +776,21 @@ def _run_image(task_id):
         store.update(task_id, polling=False, error="還沒有 GMI Cloud 的 API key，設定後會自動繼續")
         return
     store.update(task_id, polling=True, error="")
+    if record.get("parts"):
+        _run_image_parts(task_id, key)
+        return
+    current, save = _record_access(task_id)
 
     def on_update(status, task, elapsed):
         fields = {"status": status}
         if status in FAILED:
             fields["finished_at"] = time.time()
-        if store.update(task_id, **fields) is None:
-            raise _TaskRemoved
+        save(**fields)
 
     try:
         if not (record.get("status") == "SUCCESS" and record.get("result_urls")):
             with api_session(key) as s:
-                result = _image_result(s, task_id, record, on_update)
+                result = _image_result(s, current, save, on_update)
             family = image_family(result.get("model"))
             if record.get("imported") and not family:  # 在圖片模式貼了影片的 request_id
                 raise gmi_image.RequestFailed(f"這是 {result.get('model')} 的請求，不是圖片：請切到「影片」再用 ID 查詢")
@@ -784,7 +815,9 @@ def _run_image(task_id):
             record = store.update(task_id, **fields)
             if record is None:
                 return
-        files = download_images(task_id, record)
+        store.update(task_id, downloading=True)
+        files = download_images(record.get("request_id") or task_id, record.get("result_urls") or [],
+                                image_format(record.get("parameters")))
         store.update(task_id, files=files, downloading=False, polling=False)
     except _TaskRemoved:
         pass
@@ -798,54 +831,213 @@ def _run_image(task_id):
                      error=explain_image_failure(friendly_error(e), task_spec(task_id)))
 
 
-def _image_result(session, task_id, record, on_update):
+def _run_image_parts(task_id, key):
+    """多張的任務（模型一次只生成一張：Gemini、Seedream）：同一個請求送出「張數」次，最多同時 IMAGE_PARALLEL 個。
+    每張各自送出（或找回、接著查）→ 下載，做完一張就顯示一張；全部結束後整理成功、失敗的張數。
+    失敗的張不重送；查詢中斷的張，按「重新查詢」或重新啟動時接著查。"""
+    record = store.get(task_id)
+    if record is None:
+        return
+    todo = [i for i, p in enumerate(record["parts"]) if not p.get("files") and p.get("status") not in FAILED]
+    if todo:
+        with ThreadPoolExecutor(max_workers=min(IMAGE_PARALLEL, len(todo))) as pool:
+            list(pool.map(lambda i: _run_part(task_id, i, key), todo))
+    record = store.get(task_id)
+    if record is None:
+        return
+    parts = record["parts"]
+    failed = [p for p in parts if not p.get("files") and p.get("status") in FAILED]
+    stuck = [p for p in parts if not p.get("files") and p.get("status") not in FAILED]
+    done = len(parts) - len(failed) - len(stuck)
+    notes = []
+    if failed:
+        reason = failed[0].get("error") or "原因不明"
+        notes.append(f"{len(parts)} 張中有 {len(failed)} 張失敗：{reason}" if done or stuck else reason)
+    if stuck:
+        notes.append(f"有 {len(stuck)} 張還沒完成：{stuck[0].get('error') or '查詢中斷'}\n按「重新查詢」會接著查")
+    fields = {"polling": False, "error": "\n".join(notes)}
+    if not stuck:
+        fields.update(status="SUCCESS" if done else "FAILED", finished_at=time.time())
+    store.update(task_id, **fields)
+
+
+def _run_part(task_id, index, key):
+    """多張任務的第 index 張：送出（或找回、接著查）→ 下載，結果記在 parts[index]。"""
+    current, save = _part_access(task_id, index)
+
+    def on_update(status, task, elapsed):
+        save(status=status)
+
+    def finish(**fields):  # 記下失敗原因；任務已經移除就算了
+        try:
+            save(**fields)
+        except _TaskRemoved:
+            pass
+
+    try:
+        part = current()
+        if not (part.get("status") == "SUCCESS" and part.get("result_urls")):
+            with api_session(key) as s:
+                result = _image_result(s, current, save, on_update)
+            urls = gmi_image.image_urls(result)
+            if not urls:
+                raise RuntimeError(f"GMI 回報成功，但沒有圖片網址：{str(result.get('outcome'))[:300]}")
+            fields = {"status": "SUCCESS", "result_urls": urls}
+            usage = (result.get("outcome") or {}).get("request_usage")
+            if isinstance(usage, dict):
+                fields["usage"] = usage
+            save(**fields)
+            part = current()
+        files = download_images(part["request_id"], part["result_urls"], image_format(part["parameters"]))
+        save(files=files, error="")
+    except _TaskRemoved:
+        pass
+    except gmi_image.RequestFailed as e:
+        fields = {"status": "FAILED", "error": explain_image_failure(str(e), task_spec(task_id))}
+        if e.request_id:
+            fields["request_id"] = e.request_id
+        finish(**fields)
+    except (RuntimeError, TimeoutError, requests.RequestException, OSError, ValueError) as e:
+        finish(error=explain_image_failure(friendly_error(e), task_spec(task_id)))
+    except Exception as e:  # 程式的錯：記在這張上，其他張照常做完，整筆任務才不會一直停在「生成中」
+        traceback.print_exc()
+        finish(error=f"發生預料外的錯誤：{e!r}")
+
+
+def _record_access(task_id):
+    """單一請求的任務：回傳 (current, save)。current() 是整筆紀錄，save(**fields) 更新它；任務已經移除時丟 _TaskRemoved。
+    _image_result、_recover_image 透過這兩個函式讀寫，多張的任務每張用 _part_access。"""
+    def current():
+        record = store.get(task_id)
+        if record is None:
+            raise _TaskRemoved
+        return record
+
+    def save(**fields):
+        if store.update(task_id, **fields) is None:
+            raise _TaskRemoved
+    return current, save
+
+
+def _part_access(task_id, index):
+    """多張任務的第 index 張：current() 是那張的紀錄（request_id、submitted_at、status、files…）加上整筆共用的
+    model、payload、parameters、created_at；save(**fields) 只更新那張，順便整理整筆的 files（照張的順序）和進度。"""
+    def current():
+        record = store.get(task_id)
+        if record is None:
+            raise _TaskRemoved
+        shared = {k: record.get(k) for k in ("model", "payload", "parameters", "created_at")}
+        return {**record["parts"][index], **shared}
+
+    def save(**fields):
+        def apply(record):
+            parts = list(record["parts"])  # 換成新的 list、dict，正在把舊的轉成 JSON 的執行緒不受影響
+            parts[index] = {**parts[index], **fields}
+            done = sum(1 for p in parts if p.get("files") or p.get("status") in FAILED)
+            return {"parts": parts, "files": [f for p in parts for f in p.get("files") or []],
+                    "progress": f"{done}/{len(parts)} 張"}
+        if store.mutate(task_id, apply) is None:
+            raise _TaskRemoved
+    return current, save
+
+
+class _SubmitGate:
+    """送出請求和從請求列表找回請求不能同時進行。payload 相同的請求（多張任務的每一張，或內容一樣的兩個任務）在列表裡
+    分不出是誰的：找回時要等正在送出、還沒拿到 request_id 的都回應了，找的期間也不能有新的送出，才不會認領到別人的請求。"""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.sending = 0
+        self.recovering = False
+
+    @contextmanager
+    def send(self):
+        with self.cond:
+            self.cond.wait_for(lambda: not self.recovering)
+            self.sending += 1
+        try:
+            yield
+        finally:
+            with self.cond:
+                self.sending -= 1
+                self.cond.notify_all()
+
+    @contextmanager
+    def recover(self):
+        with self.cond:
+            self.cond.wait_for(lambda: not self.recovering)
+            self.recovering = True
+            self.cond.wait_for(lambda: self.sending == 0)
+        try:
+            yield
+        finally:
+            with self.cond:
+                self.recovering = False
+                self.cond.notify_all()
+
+
+_submit_gate = _SubmitGate()
+
+
+def _image_result(session, current, save, on_update):
     """回傳成功的 GMI 請求物件：還沒送出就送出並等結果；有 request_id 就查到完成為止；
-    送出後沒拿到 request_id（連線中斷、伺服器中途關閉）就從請求列表找回，不重送，免得重複扣款。"""
+    送出後沒拿到 request_id（連線中斷、伺服器中途關閉）就從請求列表找回，不重送，免得重複扣款。
+    current()、save(**fields) 讀寫這個請求的紀錄：整筆任務，或多張任務的其中一張（見 _record_access、_part_access）。"""
+    record = current()
     request_id = record.get("request_id")
     if not request_id and not record.get("submitted_at"):
-        store.update(task_id, submitted_at=time.time())
+        save(submitted_at=time.time())
         try:
-            result = gmi_image.create(session, record["model"], record["payload"], timeout=IMAGE_TIMEOUT)
+            with _submit_gate.send():
+                result = gmi_image.create(session, record["model"], record["payload"], timeout=IMAGE_TIMEOUT)
+                save(request_id=result["request_id"])
         except gmi_image.LostResponse as e:
-            request_id = _recover_image(session, task_id, str(e))
+            request_id = _recover_image(session, current, save, str(e))
         else:
-            if store.update(task_id, request_id=result["request_id"]) is None:
-                raise _TaskRemoved
             if gmi_video.STATUS.get(str(result.get("status", "")).lower()) == "SUCCESS":
                 return result
-            request_id = result["request_id"]  # 萬一 GMI 改成非同步：照影片的方式查到完成
+            request_id = result["request_id"]  # 非同步模型（Seedream）：照影片的方式查到完成
     elif not request_id:
-        request_id = _recover_image(session, task_id, "伺服器在等圖片生成時關閉了")
+        request_id = _recover_image(session, current, save, "伺服器在等圖片生成時關閉了")
     return gmi_video.wait_for_task(session, request_id, timeout=POLL_TIMEOUT, interval=5, on_update=on_update,
                                    model=record["model"])
 
 
-def _recover_image(session, task_id, reason):
-    """送出後沒拿到 request_id：到 GMI 的請求列表找 payload 相同的請求，找到就記下並回傳 request_id。"""
-    record = store.get(task_id)
-    if record is None:
-        raise _TaskRemoved
-    claimed = {t.get("request_id") for t in store.all() if t["task_id"] != task_id}
+def _recover_image(session, current, save, reason):
+    """送出後沒拿到 request_id：到 GMI 的請求列表找 payload 相同、還沒被任何任務認領的請求，找到就記下並回傳 request_id。"""
+    record = current()
     since = record.get("submitted_at") or record["created_at"]
-    for attempt in range(4):  # 請求可能要一下子才出現在列表裡
-        if attempt:
-            time.sleep(10)
-        found = gmi_image.find_by_payload(session, record["model"], record["payload"], since, claimed)
-        if found:
-            if store.update(task_id, request_id=found["request_id"]) is None:
-                raise _TaskRemoved
-            return found["request_id"]
+    with _submit_gate.recover():
+        for attempt in range(4):  # 請求可能要一下子才出現在列表裡
+            if attempt:
+                time.sleep(10)
+            found = gmi_image.find_by_payload(session, record["model"], record["payload"], since, claimed_request_ids())
+            if found:
+                save(request_id=found["request_id"])
+                return found["request_id"]
     # 當成失敗（不再自動重試）：請求沒建立，下次啟動再找也找不到
     raise gmi_image.RequestFailed(f"{reason}，GMI 的請求列表裡也找不到這個請求，應該沒有建立成功，可以重新送出")
 
 
-def download_images(task_id, record):
-    """把生成的圖片存到 outputs/，檔名用 GMI 的 request_id（一次多張時加 -1、-2…）；已經下載過的不重下。"""
-    urls = record.get("result_urls") or []
-    base = safe_name(record.get("request_id") or task_id)
-    params = record.get("parameters") or {}
-    fmt = params.get("output_format") or params.get("image_output_format")
-    store.update(task_id, downloading=True)
+def claimed_request_ids():
+    """所有任務（含多張任務的每一張）已經記下的 GMI request_id。"""
+    ids = set()
+    for t in store.all():
+        ids.add(t.get("request_id"))
+        ids.update(p.get("request_id") for p in t.get("parts") or [])
+    ids.discard(None)
+    return ids
+
+
+def image_format(parameters):
+    """參數指定的輸出格式（GPT Image、Seedream 叫 output_format，Gemini 叫 image_output_format），下載時認不出檔案類型才用。"""
+    parameters = parameters or {}
+    return parameters.get("output_format") or parameters.get("image_output_format")
+
+
+def download_images(base, urls, fmt=None):
+    """把一個請求生成的圖片存到 outputs/，檔名用 GMI 的 request_id（一次多張時加 -1、-2…）；已經下載過的不重下。"""
+    base = safe_name(base)
     files = []
     for i, url in enumerate(urls, 1):
         stem = base if len(urls) == 1 else f"{base}-{i}"
@@ -990,8 +1182,8 @@ def resume_pending(provider=None):
             continue
         if task.get("file") and (OUTPUTS / task["file"]).exists():
             continue
-        files = task.get("files")  # 圖片任務
-        if files and all((OUTPUTS / f).exists() for f in files):
+        files = task.get("files")  # 圖片任務；多張的任務做到一半時也有 files，要等狀態是成功才算完成
+        if files and all((OUTPUTS / f).exists() for f in files) and task.get("status") == "SUCCESS":
             continue
         start_poller(task["task_id"])
 
@@ -1054,10 +1246,12 @@ def check_update(apply, quick=False):
 
 
 def image_waiting():
-    """送出後還在等 GMI 同步回應的圖片任務：這時重新啟動只能靠請求列表找回，手動更新前先等它們完成。"""
+    """還有請求在等 GMI 同步回應（還沒有 request_id）的圖片任務：這時重新啟動只能靠請求列表找回，手動更新前先等它們完成。
+    多張的任務看每一張。"""
     with _pollers_lock:
         alive = {task_id for task_id, t in _pollers.items() if t.is_alive()}
-    return [t for t in store.all() if t["task_id"] in alive and t.get("kind") == "image" and not t.get("request_id")]
+    return [t for t in store.all() if t["task_id"] in alive and t.get("kind") == "image"
+            and any(not r.get("request_id") and r.get("status") not in FAILED for r in t.get("parts") or [t])]
 
 
 def request_restart(server, status):
@@ -1182,9 +1376,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(create_image_task(body) if body.get("kind") == "image" else create_task(body))
         if method == "POST" and path == "/api/preview":
             body = self._read_json()
-            if body.get("kind") == "image":
-                _, model, _, _, payload, _ = prepare_image_request(body, dry_run=True)
-                return self._send_json({"request": {"model": model, "payload": payload}})
+            if body.get("kind") == "image":  # count：同一個請求要送出幾次（一次只生成一張的模型要多張時）
+                _, model, _, _, payload, _, count = prepare_image_request(body, dry_run=True)
+                return self._send_json({"request": {"model": model, "payload": payload}, "count": count})
             spec, prompt, negative, parameters, media, _ = prepare_request(body, dry_run=True)
             return self._send_json({"request": request_json(spec, prompt, negative, parameters, media)})
         if method == "POST" and path == "/api/tasks/import":
