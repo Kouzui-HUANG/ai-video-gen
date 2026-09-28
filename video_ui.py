@@ -1061,6 +1061,9 @@ def explain_image_failure(text, spec=None):
     Gemini 被 Google 擋下時，訊息裡有 Vertex AI 的 finishReason／blockReason（IMAGE_SAFETY、PROHIBITED_CONTENT…）。"""
     if re.search(r"failed to fetch image|Failed to download media", text, re.I):
         return f"模型供應商下載不到參考圖：網址打不開、要登入才能看，或已經過期（失敗不收費）。\n原始訊息：{text}"
+    if re.search(r"Backend error \(40\d\)", text):  # Seedream（BytePlus）在送出時就拒絕，GMI 不轉告原因
+        return ("BytePlus 拒絕了這個請求，GMI 沒有轉告原因（請求沒有建立，不收費）。常見原因：參考圖網址打不開、"
+                f"提示詞或參考圖沒通過審核，或尺寸不被接受。\n原始訊息：{text}")
     m = re.search(r"(Input|Output)(Text|Image)SensitiveContentDetected", text)
     if m:  # Seedream（BytePlus）的內容審核
         what = {("Input", "Text"): "提示詞", ("Input", "Image"): "參考圖", ("Output", "Image"): "生成的圖片",

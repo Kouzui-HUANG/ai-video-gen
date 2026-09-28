@@ -114,17 +114,23 @@ def create(session, model, payload, timeout=900):
 
 
 def find_by_payload(session, model, payload, since, exclude=(), pages=2):
-    """從請求列表找出 since（秒）之後建立、payload 完全相同的請求；沒拿到 request_id 時用來找回。"""
+    """從請求列表找出 since（秒）之後建立、payload 完全相同的請求；沒拿到 request_id 時用來找回。
+
+    送出時就被擋下的請求（例如 Seedream 回 HTTP 500「Backend error (400)」）沒給 request_id，卻會以 failed 留在列表裡，
+    所以先找沒失敗的：多張的任務裡有一張被擋、另一張斷線時，斷線的那張才會找回自己的請求。都沒有才用失敗的。"""
+    failed = None
     for page in range(pages):
         resp = session.get(f"{BASE_URL}/requests", params={"model_id": model, "limit": 100, "offset": page * 100}, timeout=30)
         check_http(resp)
         data = resp.json()
         for r in data.get("requests") or []:
             if r.get("request_id") not in exclude and (r.get("created_at") or 0) >= since - 60 and r.get("payload") == payload:
-                return r
+                if str(r.get("status", "")).lower() != "failed":
+                    return r
+                failed = failed or r
         if not data.get("has_more"):
             break
-    return None
+    return failed
 
 
 def image_urls(task):
