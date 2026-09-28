@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="__THEME__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,8 +16,10 @@
   --radius: 12px;
   color-scheme: light;
 }
+/* 暗色：選項的主題是「跟隨系統」時看系統設定，選「暗色」時一律套用（video_ui.py 把設定填進 <html data-theme>）。
+   下面兩段的顏色一樣，改的時候要一起改 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111115; --panel: #1a1a20; --panel-2: #22222a; --border: #2d2d37; --border-strong: #3c3c48;
     --text: #ececf1; --muted: #a0a0ad; --faint: #6f6f7c;
     --accent: #8a80ff; --accent-hover: #9d95ff; --accent-weak: #29264a; --accent-text: #15131f;
@@ -26,6 +28,15 @@
     --shadow: none;
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #111115; --panel: #1a1a20; --panel-2: #22222a; --border: #2d2d37; --border-strong: #3c3c48;
+  --text: #ececf1; --muted: #a0a0ad; --faint: #6f6f7c;
+  --accent: #8a80ff; --accent-hover: #9d95ff; --accent-weak: #29264a; --accent-text: #15131f;
+  --ok: #4cc47f; --ok-weak: #173323; --warn: #e3a93e; --warn-weak: #3a2c10; --err: #f07070; --err-weak: #3d1a1a;
+  --run: #6ea1ff; --run-weak: #1a2640;
+  --shadow: none;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -48,6 +59,7 @@ a { color: var(--accent); }
   backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
 }
 .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.top-end { display: flex; align-items: center; gap: 10px; }  /* API key 和齒輪：窄畫面換行時一起走 */
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .logo { width: 32px; height: 32px; flex: none; display: block; }
 .brand h1 { font-size: 16px; line-height: 1.2; }
@@ -69,6 +81,13 @@ a { color: var(--accent); }
   background-repeat: no-repeat; background-position: right 11px center; background-size: 10px 6px;
 }
 .switch select:hover { border-color: var(--border-strong); }
+.icon-btn {
+  position: relative; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; flex: none;
+  border-radius: 9px; border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+}
+.icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.icon-btn svg { width: 18px; height: 18px; display: block; }
+.icon-btn .dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
 
 .file-warning {
   max-width: 1392px; margin: 16px auto 0; padding: 12px 16px; border-radius: var(--radius);
@@ -346,6 +365,46 @@ dialog p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
 dialog input[type="password"] { width: 100%; }
 dialog .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 dialog .dlg-err { color: var(--err); font-size: 13px; margin-top: 8px; }
+
+/* 選項 */
+dialog.settings { width: min(600px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; overflow: auto; }
+.settings-top {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 14px 16px 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+dialog .settings-top h2 { margin: 0; }
+.settings-top .x-btn { position: static; flex: none; }
+.settings-body { padding: 0 20px 12px; }
+.set-note { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--err-weak); color: var(--err); font-size: 13px; }
+.set-group { padding: 14px 0 6px; border-bottom: 1px solid var(--border); }
+.set-group:last-child { border-bottom: 0; }
+dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font-size: 13px; font-weight: 650; color: var(--muted); }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 9px 0; flex-wrap: wrap; }
+.set-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 250px; }
+.set-label b { font-size: 14px; font-weight: 600; }
+.set-label small { color: var(--muted); font-size: 12.5px; word-break: break-word; }
+.set-label code { font: 12px ui-monospace, Menlo, monospace; }
+.soon-tag { font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 6px; color: var(--faint); background: var(--panel-2); border: 1px solid var(--border); }
+.set-group.soon .set-row { opacity: .5; }
+.toggle {
+  appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 38px; height: 22px; margin: 0;
+  border-radius: 999px; background: var(--border-strong); cursor: pointer; transition: background .15s;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s;
+}
+.toggle:checked { background: var(--accent); }
+.toggle:checked::after { transform: translateX(16px); }
+.toggle:disabled { cursor: not-allowed; opacity: .6; }
+.update-box { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); font-size: 13px; }
+.update-box.good { background: var(--ok-weak); color: var(--ok); }
+.update-box.warn { background: var(--warn-weak); color: var(--warn); }
+.update-box.news { background: var(--accent-weak); color: var(--text); }
+.update-box .sub { color: var(--muted); font-size: 12px; word-break: break-word; }
+.update-box.good .sub, .update-box.warn .sub { color: inherit; opacity: .8; }
+.update-box .acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 2px; }
+.update-box .acts a { font-size: 12.5px; }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: min(420px, calc(100vw - 32px)); }
 .toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); animation: pop .18s ease-out; white-space: pre-wrap; word-break: break-word; }
 .toast.error { background: var(--err); color: #fff; }
@@ -377,7 +436,16 @@ dialog .dlg-err { color: var(--err); font-size: 13px; margin-top: 8px; }
       </div>
     </div>
     <label class="switch"><span>模型</span><select id="modelSelect" aria-label="模型"></select></label>
-    <button id="keyPill" class="pill" type="button">API key：檢查中…</button>
+    <div class="top-end">
+      <button id="keyPill" class="pill" type="button">API key：檢查中…</button>
+      <button id="settingsBtn" class="icon-btn" type="button" aria-label="選項" title="選項">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10.23 4.61L10.32 1.94A10.2 10.2 0 0 1 13.68 1.94L13.77 4.61A7.6 7.6 0 0 1 15.97 5.52L17.92 3.70A10.2 10.2 0 0 1 20.30 6.08L18.48 8.03A7.6 7.6 0 0 1 19.39 10.23L22.06 10.32A10.2 10.2 0 0 1 22.06 13.68L19.39 13.77A7.6 7.6 0 0 1 18.48 15.97L20.30 17.92A10.2 10.2 0 0 1 17.92 20.30L15.97 18.48A7.6 7.6 0 0 1 13.77 19.39L13.68 22.06A10.2 10.2 0 0 1 10.32 22.06L10.23 19.39A7.6 7.6 0 0 1 8.03 18.48L6.08 20.30A10.2 10.2 0 0 1 3.70 17.92L5.52 15.97A7.6 7.6 0 0 1 4.61 13.77L1.94 13.68A10.2 10.2 0 0 1 1.94 10.32L4.61 10.23A7.6 7.6 0 0 1 5.52 8.03L3.70 6.08A10.2 10.2 0 0 1 6.08 3.70L8.03 5.52A7.6 7.6 0 0 1 10.23 4.61Z"/>
+          <circle cx="12" cy="12" r="3.1"/>
+        </svg>
+        <i class="dot" id="settingsDot" hidden></i>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -589,6 +657,88 @@ dialog .dlg-err { color: var(--err); font-size: 13px; margin-top: 8px; }
     <span class="sep"></span>
     <button class="btn small" type="button" id="viewerReveal">顯示檔案</button>
     <a class="btn small" id="viewerOpen" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">開新分頁</a>
+  </div>
+</dialog>
+<!-- 選項：主題、語言、自動更新存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
+<dialog id="settingsDialog" class="settings" aria-labelledby="settingsTitle">
+  <div class="settings-top">
+    <h2 id="settingsTitle">選項</h2>
+    <button class="x-btn" type="button" id="settingsClose" aria-label="關閉" title="關閉（Esc）">×</button>
+  </div>
+  <div class="settings-body">
+    <p class="set-note" id="settingsNote" hidden></p>
+
+    <section class="set-group" aria-labelledby="setLook">
+      <h3 id="setLook">外觀</h3>
+      <div class="set-row">
+        <div class="set-label"><b>主題</b><small>跟隨系統時，會依電腦的淺色／深色外觀自動切換</small></div>
+        <div class="seg" id="themeSeg" role="group" aria-label="主題">
+          <button type="button" data-theme-choice="system" aria-pressed="true">跟隨系統</button>
+          <button type="button" data-theme-choice="light" aria-pressed="false">亮色</button>
+          <button type="button" data-theme-choice="dark" aria-pressed="false">暗色</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>語言</b><small>介面目前只有繁體中文</small></div>
+        <select id="langSelect" aria-label="語言">
+          <option value="zh-Hant">繁體中文</option>
+          <option value="en" disabled>English（即將推出）</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="set-group" aria-labelledby="setUpdate">
+      <h3 id="setUpdate">更新</h3>
+      <div class="set-row">
+        <label class="set-label" for="autoUpdate"><b>啟動時自動更新</b><small>每次啟動時比對 GitHub 上 main 的最新版本，有新版就先更新再開啟。本機有還沒 commit 的修改或還沒推上 GitHub 的 commit 時會略過。</small></label>
+        <input type="checkbox" class="toggle" id="autoUpdate" role="switch">
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>目前版本</b><small id="verCurrent">—</small></div>
+        <button class="btn small" type="button" id="checkUpdate">檢查更新</button>
+      </div>
+      <div class="update-box" id="updateBox" role="status" hidden></div>
+    </section>
+
+    <section class="set-group soon" aria-labelledby="setNotify">
+      <h3 id="setNotify">通知 <span class="soon-tag">即將推出</span></h3>
+      <div class="set-row">
+        <div class="set-label"><b>任務完成時通知</b><small>影片或圖片生成完成、失敗時跳出系統通知，網頁在背景也看得到</small></div>
+        <input type="checkbox" class="toggle" role="switch" disabled aria-label="任務完成時通知">
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>提示音</b><small>任務完成或失敗時播放提示音</small></div>
+        <input type="checkbox" class="toggle" role="switch" disabled aria-label="提示音">
+      </div>
+    </section>
+
+    <section class="set-group soon" aria-labelledby="setStorage">
+      <h3 id="setStorage">儲存 <span class="soon-tag">即將推出</span></h3>
+      <div class="set-row">
+        <div class="set-label"><b>輸出資料夾</b><small id="outputsDir">生成的影片、圖片和任務紀錄存放的位置</small></div>
+        <button class="btn small" type="button" disabled>變更…</button>
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>素材副本</b><small>加入過的本機素材會在 outputs/inputs/ 留一份副本，重用設定時會用到；之後可在這裡查看占用空間和清理</small></div>
+        <button class="btn small" type="button" disabled>清理…</button>
+      </div>
+    </section>
+
+    <section class="set-group soon" aria-labelledby="setDefaults">
+      <h3 id="setDefaults">預設值 <span class="soon-tag">即將推出</span></h3>
+      <div class="set-row">
+        <div class="set-label"><b>開啟時的 API 與模型</b><small>目前會沿用上次的選擇</small></div>
+        <select disabled aria-label="開啟時的 API 與模型"><option>沿用上次</option></select>
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>圖片自動最佳化</b><small>加入參考圖片時，預設是否轉成 JPEG、長邊縮到 2048px</small></div>
+        <input type="checkbox" class="toggle" role="switch" checked disabled aria-label="圖片自動最佳化">
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>臨時連結保存時間</b><small>MixRoute 上傳到 Litterbox 的本機素材預設保存多久</small></div>
+        <select disabled aria-label="臨時連結保存時間"><option>1 小時</option></select>
+      </div>
+    </section>
   </div>
 </dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
@@ -1981,7 +2131,7 @@ async function refreshTasks() {
     serverDown = false;
     renderTasks();
   } catch (e) {
-    if (!serverDown) toast(e.message, 'error');
+    if (!serverDown && !restarting) toast(e.message, 'error');
     serverDown = true;
   }
   const busy = tasks.some(t => t.polling || t.downloading);
@@ -2182,6 +2332,120 @@ async function saveKey(provider, key, remember, quiet) {
   if (res.warning) toast(res.warning);
   else if (!quiet) toast(`${PROVIDERS[provider].label} API key 已設定`);
   refreshTasks();
+}
+
+// ---------- 選項與自動更新 ----------
+// 選項存在伺服器的 outputs/settings.json（啟動時網頁還沒開，伺服器就要知道要不要檢查更新）；舊版伺服器沒有，settings 是 null
+let settings = null;
+let version = null;       // 正在執行的版本 { sha, short, time, label }；不是 git clone 的是 null
+let update = null;        // 最近一次檢查更新的結果（updater.py 的 run()）；這次啟動還沒檢查過是 null
+let restarting = false;   // 更新後等伺服器重新啟動，這段時間連不上是正常的
+const NOTICED_KEY = 'wanui.updateNoticed';  // 已經提示過「已更新到…」的版本，重新整理不再提示
+// 更新狀態的顏色：good 綠、news 有新版、warn 黃
+const UPDATE_TONE = { up_to_date: 'good', updated: 'good', available: 'news', blocked: 'warn', rolled_back: 'warn', offline: 'warn', error: 'warn', unsupported: 'warn' };
+
+function applyTheme() { document.documentElement.dataset.theme = settings?.theme || 'system'; }
+function renderSettings() {
+  const ok = !!settings;
+  $('#settingsNote').hidden = ok;
+  $('#settingsNote').textContent = serverOk ? '本機的 video_ui.py 是舊版，沒有選項功能：請關掉它再重新開啟 App。'
+    : '連不到本機伺服器，選項無法讀取或儲存。';
+  for (const b of $$('#themeSeg button')) {
+    b.setAttribute('aria-pressed', String((settings?.theme || 'system') === b.dataset.themeChoice));
+    b.disabled = !ok;
+  }
+  $('#langSelect').value = settings?.language || 'zh-Hant';
+  $('#langSelect').disabled = !ok;
+  $('#autoUpdate').checked = !!settings?.auto_update;
+  $('#autoUpdate').disabled = !ok || !version;  // 讀不到版本（例如不是 git clone 的）就沒辦法自動更新
+  $('#verCurrent').textContent = version ? version.label : ok ? '無法取得（不是用 git clone 下載的）' : '—';
+  $('#checkUpdate').disabled = !ok || restarting;
+  renderUpdate();
+}
+function renderUpdate(busyText) {
+  const box = $('#updateBox'), u = update;
+  $('#settingsDot').hidden = !u?.update_available;
+  box.replaceChildren();
+  box.className = 'update-box';
+  if (busyText) {
+    box.hidden = false;
+    box.append(h('div', {}, h('span', { class: 'spin' }), ' ' + busyText));
+    return;
+  }
+  if (!u) {
+    box.hidden = !settings;
+    box.append(h('div', { text: settings?.auto_update ? '這次啟動還沒檢查更新。' : '自動更新已關閉，可以按「檢查更新」手動檢查。' }));
+    return;
+  }
+  box.hidden = false;
+  if (UPDATE_TONE[u.state]) box.classList.add(UPDATE_TONE[u.state]);
+  const text = u.state === 'updated' && u.previous ? `已從 ${u.previous.label}更新到 ${u.current.label}。` : u.message;
+  box.append(h('div', { text }));
+  if (u.latest && u.current && u.latest.sha !== u.current.sha && !text.includes(u.latest.label))
+    box.append(h('div', { class: 'sub', text: `GitHub 上的最新版本：${u.latest.label}` }));
+  if (u.detail) box.append(h('div', { class: 'sub', text: u.detail }));
+  box.append(h('div', { class: 'sub', text: `檢查時間：${fmtDate(u.checked_at)}` }));
+  const acts = h('div', { class: 'acts' });
+  if (u.state === 'available') acts.append(h('button', { class: 'btn small', type: 'button', text: '立即更新並重新啟動', onclick: e => applyUpdate(e.currentTarget) }));
+  const base = u.previous || u.current;  // 有新版（或剛更新完）時連到兩個版本的差異
+  if (u.web && base && u.latest && (u.update_available || u.state === 'updated') && base.sha !== u.latest.sha)
+    acts.append(h('a', { href: `${u.web}/compare/${base.sha}...${u.latest.sha}`, target: '_blank', rel: 'noopener', text: '看看改了什麼' }));
+  else if (u.web) acts.append(h('a', { href: `${u.web}/commits/main`, target: '_blank', rel: 'noopener', text: '在 GitHub 上查看' }));
+  if (acts.childElementCount) box.append(acts);
+}
+function openSettings() {
+  renderSettings();
+  $('#settingsDialog').showModal();
+}
+async function saveSetting(changes) {
+  const before = settings;
+  settings = { ...settings, ...changes };
+  applyTheme();
+  renderSettings();
+  try {
+    settings = (await api('/api/settings', { method: 'POST', json: changes })).settings;
+  } catch (e) {
+    settings = before;
+    toast('選項沒有儲存：' + e.message, 'error');
+  }
+  applyTheme();
+  renderSettings();
+}
+async function checkUpdate() {
+  $('#checkUpdate').disabled = true;
+  renderUpdate('檢查中…');
+  try {
+    update = (await api('/api/update', { method: 'POST', json: { apply: false } })).update;
+  } catch (e) { toast(e.message, 'error'); }
+  renderSettings();
+}
+// 更新完伺服器會重新啟動：等它帶著新版本回來再重新整理網頁（草稿先存好，重新整理後還原）
+async function applyUpdate(btn) {
+  if (state.items.some(it => it.status === 'uploading' || it.status === 'processing')) {
+    toast('還有素材在處理，等處理完再更新（重新啟動會中斷處理）', 'error');
+    return;
+  }
+  btn.disabled = true;
+  $('#checkUpdate').disabled = true;
+  renderUpdate('下載並更新到新版本…');
+  try {
+    const res = await api('/api/update', { method: 'POST', json: { apply: true } });
+    update = res.update;
+    if (!res.restarting) return renderSettings();
+    restarting = true;
+    saveState();
+    renderUpdate(`已更新到 ${update.current.label}，正在重新啟動…`);
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        const cfg = await (await fetch('/api/config', { cache: 'no-store' })).json();
+        if (cfg.version?.sha === update.current.sha) return location.reload();
+      } catch { /* 還在重新啟動 */ }
+    }
+    restarting = false;
+    toast('伺服器重新啟動後沒有回應，請關掉網頁再重新開啟 App', 'error');
+  } catch (e) { toast(e.message, 'error'); }
+  renderSettings();
 }
 
 // ---------- 切換影片／圖片、API 與模型 ----------
@@ -2385,6 +2649,16 @@ function bindEvents() {
 
   $('#keyPill').addEventListener('click', openKeyDialog);
   $('#keyCancel').addEventListener('click', () => $('#keyDialog').close());
+  $('#settingsBtn').addEventListener('click', openSettings);
+  $('#settingsClose').addEventListener('click', () => $('#settingsDialog').close());
+  $('#settingsDialog').addEventListener('click', e => { if (e.target === $('#settingsDialog')) $('#settingsDialog').close(); });  // 點背景關閉
+  $('#themeSeg').addEventListener('click', e => {
+    const b = e.target.closest('button[data-theme-choice]');
+    if (b && settings && b.dataset.themeChoice !== settings.theme) saveSetting({ theme: b.dataset.themeChoice });
+  });
+  $('#langSelect').addEventListener('change', e => saveSetting({ language: e.target.value }));
+  $('#autoUpdate').addEventListener('change', e => saveSetting({ auto_update: e.target.checked }));
+  $('#checkUpdate').addEventListener('click', checkUpdate);
   $('#keyForm').addEventListener('submit', async e => {
     e.preventDefault();
     const key = $('#keyInput').value.trim();
@@ -2445,6 +2719,15 @@ async function init() {
     Object.assign(state.keys, cfg.keys);
     state.prices = cfg.prices || {};
     state.platform = cfg.platform;
+    settings = cfg.settings || null;
+    version = cfg.version || null;
+    update = cfg.update || null;
+    if (settings) applyTheme();
+    if (cfg.outputs_dir) $('#outputsDir').textContent = `生成的影片、圖片和任務紀錄存放在 ${cfg.outputs_dir}`;
+    if (update?.state === 'updated' && safeGet(NOTICED_KEY) !== update.current.sha) {
+      toast(`已更新到 ${update.current.label}`);
+      try { localStorage.setItem(NOTICED_KEY, update.current.sha); } catch { /* 存不了就算了 */ }
+    }
     // 伺服器上沒有 key 的 API，帶入記在瀏覽器裡的 key
     await Promise.all(Object.entries(PROVIDERS).map(async ([name, cap]) => {
       const remembered = safeGet(cap.keyStore);
@@ -2455,6 +2738,7 @@ async function init() {
     toast(e.message, 'error');
   }
   renderKey();
+  renderUpdate();  // 有新版但沒更新（例如自動更新被略過）時齒輪上會有小圓點
   renderIssues();
   refreshTasks();
   if (serverOk) fixImages();

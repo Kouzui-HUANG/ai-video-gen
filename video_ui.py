@@ -21,6 +21,10 @@
   （拿到連結的人都能下載）；不支援文件和網頁素材。
 - 完成的影片存到 outputs/<task_id>.mp4，圖片存到 outputs/<request_id>.png（一次多張時加 -1、-2…），
   任務紀錄在 outputs/tasks.json；加入過的本機素材副本在 outputs/inputs/（重用設定、臨時連結過期重傳時會用到）。
+- 網頁右上角的齒輪是「選項」：主題（跟隨系統／亮色／暗色）、語言（目前只有繁體中文）、啟動時自動更新，
+  存在 outputs/settings.json。
+- 自動更新（updater.py）：啟動時比對 GitHub 上 main 的最新 commit，有新版就用 git 快轉更新，再重新啟動自己載入新版。
+  只支援用 git clone 下載的專案；本機有還沒 commit 的修改、還沒推上 GitHub 的 commit，或不在 main 分支時略過。
 """
 import argparse
 import base64
@@ -47,6 +51,7 @@ import requests
 import gmi_image
 import gmi_video
 import image_models
+import updater
 import video_models
 import mixroute_video
 from mixroute_video import BASE_URL, FAILED, check_http
@@ -56,6 +61,7 @@ HTML_FILE = ROOT / "video_ui.html"
 OUTPUTS = ROOT / "outputs"
 INPUTS = OUTPUTS / "inputs"
 TASKS_FILE = OUTPUTS / "tasks.json"
+SETTINGS_FILE = OUTPUTS / "settings.json"
 
 LITTERBOX_API = "https://litterbox.catbox.moe/resources/internals/api.php"
 LITTERBOX_TTLS = {"1h": 3600, "12h": 12 * 3600, "24h": 24 * 3600, "72h": 72 * 3600}
@@ -88,6 +94,14 @@ SPECS = {(m["provider"], m["id"]): m for m in video_models.MODELS}
 # 圖片模型用 image_models.py 的 id（例如 gpt-image-2.5-sunburst）選，送出時才依有沒有參考圖換成 generate／edit 的 ID。
 # 任務紀錄有 kind: "image"，沒有 kind 的都是影片
 IMAGE_SPECS = {m["id"]: m for m in image_models.MODELS}
+# 選項（網頁右上角的齒輪）每一項可選的值，第一個是預設。存在伺服器這邊而不是瀏覽器：啟動時網頁還沒開，就要知道要不要檢查更新
+SETTING_CHOICES = {
+    "auto_update": (True, False),
+    "theme": ("system", "light", "dark"),
+    "language": ("zh-Hant",),  # 語言切換先留位置，之後再加 en
+}
+DEFAULT_SETTINGS = {name: choices[0] for name, choices in SETTING_CHOICES.items()}
+UPDATED_ENV = "VIDEO_UI_UPDATED"  # 更新後重新啟動時，用這個環境變數把更新結果交給新的程序
 
 store = None  # TaskStore，main() 建立
 _keys = {name: {"value": os.environ.get(p["env"]) or None} for name, p in PROVIDERS.items()}
@@ -102,6 +116,12 @@ _upload_cache = {}  # (本機檔名, ttl) -> (url, expires_at)
 _gmi_uploads = {}  # 本機檔名 -> GMI 公開網址（GMI 文件說是穩定網址，伺服器開著就沿用）
 _upload_lock = threading.Lock()
 _last_request = time.monotonic()  # 給 --idle-exit 判斷網頁是否還開著
+_settings = dict(DEFAULT_SETTINGS)  # main() 從 outputs/settings.json 讀進來
+_settings_lock = threading.Lock()
+_version = None  # 正在執行的版本（updater.current_version()），main() 設定
+_update = None  # 最近一次檢查更新的結果，給選項頁顯示；關掉自動更新又還沒手動檢查時是 None
+_update_lock = threading.Lock()
+_restart_status = None  # 選項頁按了「立即更新並重新啟動」：伺服器停下後帶著這個結果重新啟動
 
 
 class TaskStore:
@@ -935,6 +955,76 @@ def idle_watchdog(server, idle):
             return
 
 
+def valid_setting(name, value):
+    choices = SETTING_CHOICES.get(name)
+    return choices is not None and type(value) is type(choices[0]) and value in choices
+
+
+def load_settings():
+    """讀 outputs/settings.json：壞掉或不認得的值用預設；不認得的欄位（例如新版才有的選項）照樣保留。"""
+    settings = dict(DEFAULT_SETTINGS)
+    try:
+        saved = json.loads(SETTINGS_FILE.read_text("utf-8"))
+    except FileNotFoundError:
+        return settings
+    except (OSError, ValueError) as e:
+        print(f"讀不懂 {SETTINGS_FILE.name}（{e}），先用預設的選項")
+        return settings
+    if isinstance(saved, dict):
+        settings.update((k, v) for k, v in saved.items() if k not in SETTING_CHOICES or valid_setting(k, v))
+    return settings
+
+
+def save_settings(changes):
+    with _settings_lock:
+        new = dict(_settings)
+        for name, value in changes.items():
+            if not valid_setting(name, value):
+                raise ValueError(f"不支援的選項：{name} = {value!r}")
+            new[name] = value
+        tmp = SETTINGS_FILE.with_name(SETTINGS_FILE.name + ".tmp")
+        tmp.write_text(json.dumps(new, ensure_ascii=False, indent=1), "utf-8")
+        os.replace(tmp, SETTINGS_FILE)
+        _settings.update(new)
+        return dict(_settings)
+
+
+def check_update(apply, quick=False):
+    """檢查（apply=True 時並更新）GitHub 上的新版，結果記在 _update 給選項頁顯示。"""
+    global _update
+    with _update_lock:
+        _update = updater.run(apply, quick=quick)
+        return _update
+
+
+def image_waiting():
+    """送出後還在等 GMI 同步回應的圖片任務：這時重新啟動只能靠請求列表找回，手動更新前先等它們完成。"""
+    with _pollers_lock:
+        alive = {task_id for task_id, t in _pollers.items() if t.is_alive()}
+    return [t for t in store.all() if t["task_id"] in alive and t.get("kind") == "image" and not t.get("request_id")]
+
+
+def request_restart(server, status):
+    """選項頁的「立即更新並重新啟動」：回應送出後停下伺服器，main() 接著重新啟動載入新版。"""
+    global _restart_status
+    _restart_status = status
+    threading.Timer(0.3, server.shutdown).start()
+
+
+def restart(status, no_browser=False):
+    """用同樣的參數重新執行 video_ui.py 載入新版；更新結果透過環境變數交給新的程序，它就不用再檢查一次。
+    進行中的影片任務會中斷查詢，新的程序啟動時照常接著查。"""
+    os.environ[UPDATED_ENV] = json.dumps(status)
+    argv = [sys.executable, *(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv])[1:]]
+    if no_browser and "--no-browser" not in argv:
+        argv.append("--no-browser")  # 網頁已經開著，重新啟動後它會自己重新整理
+    print("重新啟動以載入新版本…", flush=True)
+    sys.stderr.flush()
+    if os.name == "nt":  # Windows 的 os.execv 會另開一個程序、原本的終端機接不回來，改成等新的程序結束
+        sys.exit(subprocess.call(argv))
+    os.execv(sys.executable, argv)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "VideoUI/1.0"
 
@@ -987,6 +1077,9 @@ class Handler(BaseHTTPRequestHandler):
                     "model": mixroute_video.MODEL,  # launch.sh 用這個欄位判斷伺服器是否已經在跑
                     "platform": sys.platform,
                     "outputs_dir": str(OUTPUTS),
+                    "settings": _settings,
+                    "version": _version,
+                    "update": _update,
                 })
             if path == "/api/tasks":
                 return self._send_json({"tasks": store.all(), "now": time.time()})
@@ -1005,6 +1098,17 @@ class Handler(BaseHTTPRequestHandler):
             warning = set_key(provider, key)
             return self._send_json({"ok": True, "warning": warning, "key_source": _keys[provider]["source"],
                                     "prices": _prices})
+        if method == "POST" and path == "/api/settings":
+            return self._send_json({"settings": save_settings(self._read_json())})
+        if method == "POST" and path == "/api/update":
+            apply = bool(self._read_json().get("apply"))
+            waiting = apply and image_waiting()
+            if waiting:
+                raise ValueError(f"有 {len(waiting)} 個圖片任務正在等 GMI 生成，完成後再更新（重新啟動會打斷等待）")
+            status = check_update(apply)
+            if status["state"] == "updated":
+                request_restart(self.server, status)
+            return self._send_json({"update": status, "restarting": status["state"] == "updated"})
         if method == "POST" and path == "/api/images":
             data = self._read_body(MAX_IMAGE_BYTES)
             ext = sniff_image(data)
@@ -1119,10 +1223,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_html(self, head=False):
         """網頁本身：把 video_models.py、image_models.py 的模型清單填進 __CATALOG__、__IMAGE_CATALOG__，
-        網頁一載入就能畫出表單。"""
+        網頁一載入就能畫出表單；選項的主題填進 __THEME__，一開始就是對的顏色，不會先閃一下。"""
         def as_json(models):
             return json.dumps(models, ensure_ascii=False).replace("</", "<\\/")
-        data = (HTML_FILE.read_text("utf-8").replace("__IMAGE_CATALOG__", as_json(image_models.MODELS), 1)
+        data = (HTML_FILE.read_text("utf-8").replace("__THEME__", _settings["theme"], 1)
+                .replace("__IMAGE_CATALOG__", as_json(image_models.MODELS), 1)
                 .replace("__CATALOG__", as_json(video_models.MODELS), 1).encode())
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1178,7 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global store
+    global store, _update, _version
     labels = dict.fromkeys(m["label"] for m in video_models.MODELS + image_models.MODELS)
     p = argparse.ArgumentParser(description=f"影片和圖片生成網頁介面（{'、'.join(labels)}）")
     p.add_argument("--port", type=int, default=8765, help="本機埠號（預設 8765）")
@@ -1188,13 +1293,33 @@ def main():
     args = p.parse_args()
 
     OUTPUTS.mkdir(exist_ok=True)
-    store = TaskStore(TASKS_FILE)
+    _settings.update(load_settings())
+    # 先佔住埠（確定沒有另一個 video_ui.py 在跑，才不會改到它正在用的檔案）再檢查更新；
+    # 檢查完才開始接受連線，launch.sh 等到連得上才開網頁，所以打開的一定是新版
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler, bind_and_activate=False)
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        server.server_bind()
     except OSError as e:
+        server.server_close()
         sys.exit(f"無法使用埠 {args.port}（{e.strerror}）：可能已經開著一個 video_ui.py，或用 --port 換一個")
     server.allowed_hosts = {f"127.0.0.1:{args.port}", f"localhost:{args.port}"}
     server.allowed_origins = {f"http://{h}" for h in server.allowed_hosts}
+    just_updated = os.environ.pop(UPDATED_ENV, None)
+    if just_updated:  # 剛更新完重新啟動
+        try:
+            _update = json.loads(just_updated)
+        except ValueError:
+            pass
+    elif _settings["auto_update"]:
+        print("檢查更新…", flush=True)
+        status = check_update(apply=True, quick=True)
+        print(f"檢查更新：{status['message']}" + (f"（{status['detail']}）" if status.get("detail") else ""), flush=True)
+        if status["state"] == "updated":
+            server.server_close()
+            restart(status)
+    _version = updater.current_version()
+    store = TaskStore(TASKS_FILE)
+    server.server_activate()
 
     url = f"http://127.0.0.1:{args.port}/"
     print(f"影片和圖片生成介面：{url}（Ctrl+C 結束）")
@@ -1213,6 +1338,8 @@ def main():
         print("\n已關閉。未完成的任務下次啟動會接著查詢。")
     finally:
         server.server_close()
+    if _restart_status:
+        restart(_restart_status, no_browser=True)
 
 
 if __name__ == "__main__":

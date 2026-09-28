@@ -14,6 +14,8 @@
 - 顯示任務進度、匯入既有任務、重用歷史設定
 - 預覽送給供應商的 JSON，並在 GMI 模型可取得價格時顯示費用估算
 - 任務完成後自動下載影片；重新啟動時會接續查詢未完成任務
+- 啟動時自動更新到 GitHub 上的最新版本（右上角齒輪的「選項」可以關閉）
+- 亮色／暗色主題，或跟隨系統外觀
 - 另提供 MixRoute Wan 3.0 的命令列介面
 
 ## 支援的 API 與模型
@@ -49,7 +51,16 @@ GMI 把每個圖片模型拆成 `-generate`（文字生圖）與 `-edit`（改�
 
 ## 快速開始
 
-### 1. 安裝依賴
+### 1. 下載專案
+
+```bash
+git clone https://github.com/Kouzui-HUANG/ai-video-gen.git
+cd ai-video-gen
+```
+
+請用 `git clone` 下載，之後每次啟動才會自動更新到最新版本（需要安裝 git；macOS 可在終端機執行 `xcode-select --install`）。用 GitHub 的「Download ZIP」下載的也能使用，只是不會自動更新。
+
+### 2. 安裝依賴
 
 建議使用虛擬環境：
 
@@ -66,7 +77,7 @@ Windows PowerShell 啟用虛擬環境的指令為：
 python -m pip install requests
 ```
 
-### 2. 設定 API key
+### 3. 設定 API key
 
 可以先透過環境變數設定：
 
@@ -84,7 +95,7 @@ $env:MIXROUTE_API_KEY="你的 MixRoute API key"
 $env:GMI_API_KEY="你的 GMI Cloud API key"
 ```
 
-### 3. 啟動網頁介面
+### 4. 啟動網頁介面
 
 ```bash
 python3 video_ui.py
@@ -125,6 +136,25 @@ App 啟動的伺服器會在網頁關閉、沒有進行中任務且閒置 10 分
 提示詞與參考圖片在影片和圖片之間共用，切換時不會消失；影片和圖片的其他參數各自保留。
 
 GPT Image 2.5 和 GPT Image 2 都是同步模型：GMI 要等圖片生成完才回應，通常需要十幾秒到數分鐘。等待期間連線中斷或伺服器重啟時，程式會從 GMI 的請求列表找回同一個請求，不會重新送出、重複收費。
+
+## 選項與自動更新
+
+按右上角的齒輪打開「選項」：
+
+- **主題**：跟隨系統、亮色或暗色。
+- **語言**：目前只有繁體中文，English 之後推出。
+- **啟動時自動更新**：預設開啟。
+
+選項存在 `outputs/settings.json`，同一台電腦不管用哪個瀏覽器開都一樣。標「即將推出」的通知、儲存、預設值目前只是先留位置。
+
+自動更新的做法：
+
+- 每次啟動時比對本機和 GitHub 上 `main` 分支的最新 commit。版本號就是 commit 的日期加上短代碼，例如 `2026.09.27（7832df3）`。
+- 有新版時用 git 快轉（fast-forward）更新、自動重新啟動載入新版，之後才打開網頁；沒有新版時啟動大約多花 1 秒。連不到 GitHub 時直接用目前的版本啟動。
+- 下列情況只提醒、不更新，不會動到你的修改：不是用 `git clone` 下載的、不在 `main` 分支、有還沒 commit 的修改、有還沒推上 GitHub 的 commit。GitHub 上有新版卻沒更新時，齒輪上會出現小圓點，原因寫在選項的「更新」區。
+- 更新後會先試著載入新版；如果新版需要還沒安裝的套件，會退回原本的版本，並在選項裡說明要安裝什麼。
+- 伺服器開著的時候不會自己檢查。可以在選項按「檢查更新」，有新版時按「立即更新並重新啟動」，網頁會在伺服器重新啟動後自動重新整理。有圖片正在等 GMI 生成時要等它完成；進行中的影片任務會在重新啟動後接著查詢。
+- 每次檢查的結果會寫在啟動記錄（`outputs/video_ui.log` 或終端機）。
 
 ## 命令列用法
 
@@ -175,6 +205,7 @@ outputs/
 ├── <task_id>.mp4          # 完成後下載的影片
 ├── <request_id>.png       # 生成的圖片（副檔名依輸出格式；一次多張時為 <request_id>-1.png、-2.png…）
 ├── tasks.json             # 任務紀錄
+├── settings.json          # 選項（主題、語言、自動更新）
 ├── inputs/                # 本機素材副本
 └── video_ui.log           # macOS App 的背景啟動記錄
 ```
@@ -192,6 +223,7 @@ outputs/
 ├── mixroute_video.py  # MixRoute API 實作與 CLI
 ├── gmi_video.py       # GMI Cloud API、上傳與狀態轉換
 ├── gmi_image.py       # GMI Cloud 圖片生成（同步請求、找回請求、下載）
+├── updater.py         # 自動更新：比對 GitHub 上的最新版本，用 git 快轉
 └── AI 影片生成.app/   # macOS 雙擊啟動器
 ```
 
@@ -223,9 +255,17 @@ python3 video_ui.py --port 9000
 
 確認 App 與 `video_ui.py` 位於同一個資料夾，且某個 `python3` 已安裝 `requests`。詳細錯誤可查看 `outputs/video_ui.log`。
 
-### 右上角沒有「影片／圖片」切換
+### 右上角沒有「影片／圖片」切換或齒輪
 
 正在執行的是更新前的 `video_ui.py`。請結束它再重新開啟：終端機執行的按 `Ctrl + C`；App 啟動的會在網頁關閉、沒有進行中任務且閒置 10 分鐘後自動結束。
+
+### 沒有自動更新
+
+打開右上角齒輪的「選項」，「更新」區會寫出原因。常見的有：
+
+- 本機有還沒 commit 的修改：commit 或還原後，下次啟動就會更新。
+- 本機和 GitHub 上各有新的 commit：在終端機執行 `git pull` 手動合併。
+- 用 ZIP 下載的：用 `git clone` 重新下載，再把原本的 `outputs/` 資料夾搬過去。
 
 ### 圖片生成失敗：Generation rejected
 
