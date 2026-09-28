@@ -21,8 +21,8 @@
   （拿到連結的人都能下載）；不支援文件和網頁素材。
 - 完成的影片存到 outputs/<task_id>.mp4，圖片存到 outputs/<request_id>.png（一次多張時加 -1、-2…），
   任務紀錄在 outputs/tasks.json；加入過的本機素材副本在 outputs/inputs/（重用設定、臨時連結過期重傳時會用到）。
-- 網頁右上角的齒輪是「選項」：主題（跟隨系統／亮色／暗色）、語言（目前只有繁體中文）、啟動時自動更新，
-  存在 outputs/settings.json。
+- 網頁右上角的齒輪是「選項」：主題（跟隨系統／亮色／暗色）、語言（目前只有繁體中文）、啟動時自動更新、
+  任務完成時的通知與提示音，存在 outputs/settings.json。通知和提示音由網頁發出，網頁要開著（在背景也可以）。
 - 自動更新（updater.py）：啟動時比對 GitHub 上 main 的最新 commit，有新版就用 git 快轉更新，再重新啟動自己載入新版。
   只支援用 git clone 下載的專案；本機有還沒 commit 的修改、還沒推上 GitHub 的 commit，或不在 main 分支時略過。
 """
@@ -99,6 +99,8 @@ SETTING_CHOICES = {
     "auto_update": (True, False),
     "theme": ("system", "light", "dark"),
     "language": ("zh-Hant",),  # 語言切換先留位置，之後再加 en
+    "notify": (False, True),  # 任務完成、失敗時跳系統通知（瀏覽器另外要允許）
+    "sound": (False, True),  # 任務完成、失敗時播放提示音
 }
 DEFAULT_SETTINGS = {name: choices[0] for name, choices in SETTING_CHOICES.items()}
 UPDATED_ENV = "VIDEO_UI_UPDATED"  # 更新後重新啟動時，用這個環境變數把更新結果交給新的程序
@@ -1096,7 +1098,8 @@ class Handler(BaseHTTPRequestHandler):
                     "update": _update,
                 })
             if path == "/api/tasks":
-                return self._send_json({"tasks": store.all(), "now": time.time()})
+                # 選項也一起帶回去：在別的分頁或瀏覽器改了（例如關掉通知），開著的網頁跟著更新
+                return self._send_json({"tasks": store.all(), "now": time.time(), "settings": _settings})
             if path.startswith("/outputs/"):
                 target = (OUTPUTS / unquote(path[len("/outputs/"):])).resolve()
                 if target.is_relative_to(OUTPUTS.resolve()) and target.is_file():

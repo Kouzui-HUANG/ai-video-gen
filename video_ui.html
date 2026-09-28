@@ -332,6 +332,8 @@ pre.preview {
 .task-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
 .task-actions .id { margin-left: auto; font: 11px ui-monospace, Menlo, monospace; color: var(--faint); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { color: var(--muted); text-align: center; padding: 40px 12px; border: 1.5px dashed var(--border-strong); border-radius: var(--radius); }
+.task.flash { animation: flash 1.8s ease-out; }  /* 點通知跳過來時標出是哪一個任務 */
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 3px transparent; } }
 
 /* ---------- 圖片模式 ---------- */
 .checker { background: repeating-conic-gradient(var(--panel-2) 0 25%, var(--panel) 0 50%) 0 0 / 16px 16px; }  /* 透明背景看得出來 */
@@ -397,14 +399,16 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
 .toggle:checked { background: var(--accent); }
 .toggle:checked::after { transform: translateX(16px); }
 .toggle:disabled { cursor: not-allowed; opacity: .6; }
-.update-box { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); font-size: 13px; }
-.update-box.good { background: var(--ok-weak); color: var(--ok); }
-.update-box.warn { background: var(--warn-weak); color: var(--warn); }
-.update-box.news { background: var(--accent-weak); color: var(--text); }
-.update-box .sub { color: var(--muted); font-size: 12px; word-break: break-word; }
-.update-box.good .sub, .update-box.warn .sub { color: inherit; opacity: .8; }
-.update-box .acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 2px; }
-.update-box .acts a { font-size: 12.5px; }
+.set-ctl { display: flex; align-items: center; gap: 10px; flex: none; }
+/* 選項裡的狀態框：更新的檢查結果、通知的權限說明 */
+.set-box { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); font-size: 13px; }
+.set-box.good { background: var(--ok-weak); color: var(--ok); }
+.set-box.warn { background: var(--warn-weak); color: var(--warn); }
+.set-box.news { background: var(--accent-weak); color: var(--text); }
+.set-box .sub { color: var(--muted); font-size: 12px; word-break: break-word; }
+.set-box.good .sub, .set-box.warn .sub { color: inherit; opacity: .8; }
+.set-box .acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 2px; }
+.set-box .acts a { font-size: 12.5px; }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: min(420px, calc(100vw - 32px)); }
 .toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); animation: pop .18s ease-out; white-space: pre-wrap; word-break: break-word; }
 .toast.error { background: var(--err); color: #fff; }
@@ -659,7 +663,7 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
     <a class="btn small" id="viewerOpen" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">開新分頁</a>
   </div>
 </dialog>
-<!-- 選項：主題、語言、自動更新存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
+<!-- 選項：主題、語言、自動更新、通知存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
 <dialog id="settingsDialog" class="settings" aria-labelledby="settingsTitle">
   <div class="settings-top">
     <h2 id="settingsTitle">選項</h2>
@@ -697,18 +701,25 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
         <div class="set-label"><b>目前版本</b><small id="verCurrent">—</small></div>
         <button class="btn small" type="button" id="checkUpdate">檢查更新</button>
       </div>
-      <div class="update-box" id="updateBox" role="status" hidden></div>
+      <div class="set-box" id="updateBox" role="status" hidden></div>
     </section>
 
-    <section class="set-group soon" aria-labelledby="setNotify">
-      <h3 id="setNotify">通知 <span class="soon-tag">即將推出</span></h3>
+    <section class="set-group" aria-labelledby="setNotify">
+      <h3 id="setNotify">通知</h3>
       <div class="set-row">
-        <div class="set-label"><b>任務完成時通知</b><small>影片或圖片生成完成、失敗時跳出系統通知，網頁在背景也看得到</small></div>
-        <input type="checkbox" class="toggle" role="switch" disabled aria-label="任務完成時通知">
+        <label class="set-label" for="notifyOn"><b>任務完成時通知</b><small>影片或圖片生成完成、失敗時跳出系統通知，網頁在背景也看得到（網頁要開著；正在看網頁時改在右下角提示）</small></label>
+        <div class="set-ctl">
+          <button class="btn small" type="button" id="notifyTest" title="馬上跳出一則測試通知">測試</button>
+          <input type="checkbox" class="toggle" id="notifyOn" role="switch">
+        </div>
       </div>
+      <div class="set-box warn" id="notifyHint" role="status" hidden></div>
       <div class="set-row">
-        <div class="set-label"><b>提示音</b><small>任務完成或失敗時播放提示音</small></div>
-        <input type="checkbox" class="toggle" role="switch" disabled aria-label="提示音">
+        <label class="set-label" for="soundOn"><b>提示音</b><small>任務完成或失敗時播放提示音（完成和失敗的聲音不同）</small></label>
+        <div class="set-ctl">
+          <button class="btn small" type="button" id="soundTest" title="先播完成、再播失敗的提示音">試聽</button>
+          <input type="checkbox" class="toggle" id="soundOn" role="switch">
+        </div>
       </div>
     </section>
 
@@ -2125,6 +2136,7 @@ function tickTimes() {
 }
 async function refreshTasks() {
   clearTimeout(refreshTimer);
+  const rev = settingsRev;
   try {
     const data = await api('/api/tasks');
     tasks = data.tasks;
@@ -2132,6 +2144,9 @@ async function refreshTasks() {
     if (serverDown) toast('已重新連上本機伺服器');
     serverDown = false;
     renderTasks();
+    // 別的分頁或瀏覽器改了選項：跟著改。這個網頁正在儲存選項時不採用，免得蓋掉還沒存好的變更
+    if (data.settings && !settingsBusy && rev === settingsRev) adoptSettings(data.settings);
+    noticeFinished();
   } catch (e) {
     if (!serverDown && !restarting) toast(e.message, 'error');
     serverDown = true;
@@ -2345,6 +2360,8 @@ let settings = null;
 let version = null;       // 正在執行的版本 { sha, short, time, label }；不是 git clone 的是 null
 let update = null;        // 最近一次檢查更新的結果（updater.py 的 run()）；這次啟動還沒檢查過是 null
 let restarting = false;   // 更新後等伺服器重新啟動，這段時間連不上是正常的
+let settingsBusy = 0;     // 正在儲存的選項數
+let settingsRev = 0;      // 開始、存完選項時各加一：輪詢任務時帶回來的選項，是在這之間發出的請求就不採用
 const NOTICED_KEY = 'wanui.updateNoticed';  // 已經提示過「已更新到…」的版本，重新整理不再提示
 // 更新狀態的顏色：good 綠、news 有新版、warn 黃
 const UPDATE_TONE = { up_to_date: 'good', updated: 'good', available: 'news', blocked: 'warn', rolled_back: 'warn', offline: 'warn', error: 'warn', unsupported: 'warn' };
@@ -2365,13 +2382,21 @@ function renderSettings() {
   $('#autoUpdate').disabled = !ok || !version;  // 讀不到版本（例如不是 git clone 的）就沒辦法自動更新
   $('#verCurrent').textContent = version ? version.label : ok ? '無法取得（不是用 git clone 下載的）' : '—';
   $('#checkUpdate').disabled = !ok || restarting;
+  const notifyOk = ok && 'notify' in settings;  // 舊版伺服器的選項沒有通知和提示音
+  $('#notifyOn').checked = !!settings?.notify;
+  $('#notifyOn').disabled = !notifyOk || !notifySupported();
+  $('#notifyTest').disabled = !notifySupported();
+  $('#soundOn').checked = !!settings?.sound;
+  $('#soundOn').disabled = !notifyOk;
+  $('#soundTest').disabled = !audioSupported();
+  renderNotifyHint();
   renderUpdate();
 }
 function renderUpdate(busyText) {
   const box = $('#updateBox'), u = update;
   $('#settingsDot').hidden = !u?.update_available;
   box.replaceChildren();
-  box.className = 'update-box';
+  box.className = 'set-box';
   if (busyText) {
     box.hidden = false;
     box.append(h('div', {}, h('span', { class: 'spin' }), ' ' + busyText));
@@ -2399,12 +2424,15 @@ function renderUpdate(busyText) {
   if (acts.childElementCount) box.append(acts);
 }
 function openSettings() {
+  notifyTested = false;  // 測試通知的說明只在按「測試」的那次顯示
   renderSettings();
   $('#settingsDialog').showModal();
 }
 async function saveSetting(changes) {
   const before = settings;
   settings = { ...settings, ...changes };
+  settingsBusy++;
+  settingsRev++;
   applyTheme();
   renderSettings();
   try {
@@ -2412,9 +2440,20 @@ async function saveSetting(changes) {
   } catch (e) {
     settings = before;
     toast('選項沒有儲存：' + e.message, 'error');
+  } finally {
+    settingsBusy--;
+    settingsRev++;
   }
   applyTheme();
   renderSettings();
+}
+// 輪詢任務時帶回來的選項和這邊的不一樣（在別的分頁或瀏覽器改過）
+function adoptSettings(fresh) {
+  if (JSON.stringify(fresh) === JSON.stringify(settings)) return;
+  settings = fresh;
+  applyTheme();
+  if (settings.sound) audioContext();
+  if ($('#settingsDialog').open) renderSettings();
 }
 async function checkUpdate() {
   $('#checkUpdate').disabled = true;
@@ -2451,6 +2490,211 @@ async function applyUpdate(btn) {
     toast('伺服器重新啟動後沒有回應，請關掉網頁再重新開啟 App', 'error');
   } catch (e) { toast(e.message, 'error'); }
   renderSettings();
+}
+
+// ---------- 通知與提示音 ----------
+// 任務從「排隊中／生成中」變成「完成／失敗」時通知：正在看網頁就在右下角提示，網頁在背景（別的分頁或程式）就跳系統通知；
+// 開了提示音再響一聲。系統通知每個瀏覽器要各自允許。網頁打開時就已經結束的任務不通知
+const TASK_NOTICE_KEY = 'wanui.taskNotices';  // 已經有分頁通知過、響過的任務：「notify:task_id」「sound:task_id」→ 狀態
+const OS_NOTIFY = { darwin: '「系統設定 › 通知」', win32: '「設定 › 系統 › 通知」' };
+const lastSeen = new Map();          // task_id → 這個分頁上次看到的狀態（statusOf 的 queued、running、success、failure）
+let notifyTested = false;            // 按過「測試」：說明沒看到通知時要檢查哪裡
+let logoIcon = '';                   // 通知的圖示：網頁的 logo 轉成 PNG
+const notifySupported = () => 'Notification' in window;
+const notifyPermission = () => notifySupported() ? Notification.permission : 'unsupported';
+const pageActive = () => document.visibilityState === 'visible' && document.hasFocus();
+const oneLine = (s, max) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > max ? s.slice(0, max - 1) + '…' : s; };
+
+// 每次輪詢任務後比對上次看到的狀態
+function noticeFinished() {
+  const done = [], again = [];
+  for (const t of tasks) {
+    const [cls] = statusOf(t), before = lastSeen.get(t.task_id), over = cls === 'success' || cls === 'failure';
+    lastSeen.set(t.task_id, cls);
+    if (before === 'running' || before === 'queued') { if (over) done.push(t); }
+    else if (before && !over) again.push(t.task_id);  // 按了「重新查詢」又開始跑：之後結束時要再通知
+  }
+  const ids = new Set(tasks.map(t => t.task_id));
+  for (const id of lastSeen.keys()) if (!ids.has(id)) lastSeen.delete(id);
+  if (!settings || !(done.length || again.length)) return;
+  const channels = [];
+  if (settings.notify && (pageActive() || notifyPermission() === 'granted')) channels.push('notify');
+  if (settings.sound && audioOk) channels.push('sound');
+  const mine = claimNotices(done, again, channels);
+  if (mine.sound.length) playChime(mine.sound.some(t => statusOf(t)[0] === 'failure') ? 'failure' : 'success');
+  if (mine.notify.length) announce(mine.notify);
+}
+// 開著好幾個分頁時（每次開 App 都會開一個），每個任務結束只通知一次、響一次：
+// 由最先看到、而且做得到的分頁負責（例如在網頁上點過、可以出聲的分頁才響），記在 localStorage 讓其他分頁略過
+function claimNotices(done, again, channels) {
+  const mine = { notify: [], sound: [] };
+  let noted = null;
+  try { noted = JSON.parse(localStorage.getItem(TASK_NOTICE_KEY)); } catch { /* 讀不到或壞掉：當作都還沒通知 */ }
+  if (!noted || typeof noted !== 'object') noted = {};
+  for (const id of again) { delete noted['notify:' + id]; delete noted['sound:' + id]; }
+  for (const t of done) {
+    const [cls] = statusOf(t);
+    for (const c of channels) {
+      if (noted[c + ':' + t.task_id] === cls) continue;
+      noted[c + ':' + t.task_id] = cls;
+      mine[c].push(t);
+    }
+  }
+  const ids = new Set(tasks.map(t => t.task_id));
+  for (const k of Object.keys(noted)) if (!ids.has(k.slice(k.indexOf(':') + 1))) delete noted[k];  // 已經移除的任務
+  try { localStorage.setItem(TASK_NOTICE_KEY, JSON.stringify(noted)); } catch { /* 存不了就各分頁自己通知 */ }
+  return mine;
+}
+function announce(list) {
+  const notes = list.length > 3 ? [summaryNotice(list)] : list.map(noticeOf);  // 一次結束很多個就合成一則
+  for (const n of notes) {
+    if (pageActive()) toast(n.brief ? `${n.title}：${n.brief}` : n.title, n.failed ? 'error' : '');
+    else showNotice(n);
+  }
+}
+function noticeOf(t) {
+  const [cls, label] = statusOf(t), image = t.kind === 'image', what = image ? '圖片' : '影片';
+  const files = taskFiles(t), failed = cls === 'failure';
+  const title = !failed ? `${what}生成完成${files.length > 1 ? `（${files.length} 張）` : ''}`
+    : label === '失敗' ? `${what}生成失敗` : label === '找不到任務' ? `找不到這個${what}任務` : what + label;  // 查詢中斷、下載失敗
+  const model = image ? imageSpecOf(t)?.label || t.model : modelLabel(t.model || DEFAULT_MODEL);
+  const took = t.finished_at ? ` · 耗時 ${fmtClock(t.finished_at - t.created_at)}` : '';
+  // 失敗的說明第一行是中文的原因，後面才是供應商的原始訊息
+  const brief = failed ? oneLine(String(t.error || '').split('\n')[0], 100)
+    : oneLine(t.prompt, 80) || (t.imported ? '（用 ID 查詢的任務）' : '（沒有提示詞）');
+  return {
+    title, brief, failed, task: t, tag: 'task-' + t.task_id,
+    body: model + took + (brief ? '\n' + brief : ''),
+    // 圖片用生成的第一張當圖示，一眼看得出是哪一張
+    icon: image && files.length ? location.origin + '/outputs/' + encodeURIComponent(files[0]) : '',
+  };
+}
+function summaryNotice(list) {
+  const failed = list.filter(t => statusOf(t)[0] === 'failure').length;
+  const brief = failed ? `完成 ${list.length - failed} 個、失敗 ${failed} 個` : '全部完成';
+  return { title: `${list.length} 個任務結束`, brief, body: brief, failed: failed > 0, tag: 'tasks' };
+}
+function showNotice(n) {
+  try {
+    // silent：聲音由「提示音」決定，不另外響系統的通知聲
+    const note = new Notification(n.title, { body: n.body, tag: n.tag, icon: n.icon || logoIcon || undefined, silent: true });
+    note.onclick = () => { window.focus(); note.close(); if (n.task) flashTask(n.task.task_id); };
+  } catch { /* 例如 Android 的 Chrome 只能從 service worker 跳通知 */ }
+}
+function flashTask(id) {  // 點通知回到網頁時，捲到那個任務並閃一下
+  const node = taskNodes.get(id)?.node;
+  if (!node) return;
+  node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  node.classList.remove('flash');
+  void node.offsetWidth;  // 重新觸發動畫
+  node.classList.add('flash');
+}
+function prepareLogo() {
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = h('canvas', { width: 128, height: 128 });
+      c.getContext('2d').drawImage(img, 0, 0, 128, 128);
+      logoIcon = c.toDataURL('image/png');  // 有些系統的通知不顯示 SVG
+    } catch { /* 畫不出來就用瀏覽器預設的圖示 */ }
+  };
+  // favicon 的 SVG 沒寫寬高，補上才不會被當成 300×150 畫歪
+  img.src = $('link[rel="icon"]').href.replace('%3Csvg ', "%3Csvg width='128' height='128' ");
+}
+// 要在使用者點擊的當下請求（Safari 的規定），問完更新說明
+function askPermission() {
+  return Notification.requestPermission().catch(() => {}).then(() => renderSettings());
+}
+async function testNotify() {
+  if (notifyPermission() === 'default') await askPermission();
+  notifyTested = true;
+  if (notifyPermission() === 'granted') showNotice({ title: '通知測試', body: '影片或圖片生成完成、失敗時，會像這樣通知你。', tag: 'test' });
+  renderSettings();
+}
+// 通知開關下面的說明：舊版伺服器、瀏覽器不支援、還沒允許、封鎖了，或按過「測試」後提醒沒看到通知要檢查哪裡
+function renderNotifyHint() {
+  const box = $('#notifyHint'), perm = notifyPermission();
+  let text = '', ask = false;
+  box.className = 'set-box warn';
+  if (settings && !('notify' in settings)) text = '本機的 video_ui.py 是舊版，還不能開啟通知和提示音：請關掉它再重新開啟 App。';
+  else if (perm === 'unsupported') text = '這個瀏覽器不支援系統通知。';
+  else if (perm === 'denied' && (settings?.notify || notifyTested)) {
+    text = `瀏覽器封鎖了這個網頁的通知：請到瀏覽器的網站設定，把 ${location.hostname} 的「通知」改成允許，再重新整理網頁。`;
+  } else if (perm === 'default' && settings?.notify) {
+    text = '這個瀏覽器還沒允許這個網頁跳出通知，網頁在背景時看不到。';
+    ask = true;
+  } else if (perm === 'granted' && notifyTested) {
+    box.className = 'set-box';
+    text = `已送出一則測試通知。沒看到的話，請到${OS_NOTIFY[state.platform] || '系統的通知設定'}確認瀏覽器可以顯示通知，也沒有開著勿擾或專注模式。`;
+  }
+  box.hidden = !text;
+  box.replaceChildren();
+  if (text) box.append(h('div', { text }));
+  if (ask) box.append(h('div', { class: 'acts' }, h('button', { class: 'btn small', type: 'button', text: '允許通知', onclick: askPermission })));
+}
+
+// 提示音用 Web Audio 合成，不需要音效檔。瀏覽器規定網頁被點過之後才能出聲（Chrome 重新整理前點過也算）：
+// 開著提示音時先建立 AudioContext，還不能出聲就等使用者第一次點擊或按鍵時啟動
+let audioCtx = null;
+let audioOk = false;  // 這個分頁已經可以出聲
+let audioUntil = 0;   // 排好的提示音在 audioCtx 的這個時間播完
+let audioSleep;
+const CHIMES = {  // 波形和音符：[第幾秒開始, 頻率（Hz）]
+  success: { wave: 'sine', notes: [[0, 784], [0.13, 1047]] },    // G5 → C6，往上
+  failure: { wave: 'triangle', notes: [[0, 523], [0.2, 440]] },  // C5 → A4，往下
+};
+const audioSupported = () => !!(window.AudioContext || window.webkitAudioContext);
+function audioContext() {
+  if (!audioCtx && audioSupported()) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; }
+    const check = () => { if (audioCtx.state === 'running') audioOk = true; };
+    audioCtx.addEventListener('statechange', check);
+    check();
+    sleepAudio();
+  }
+  return audioCtx;
+}
+function sleepAudio() {  // 播完就暫停，不一直佔著音訊裝置
+  clearTimeout(audioSleep);
+  audioSleep = setTimeout(() => {
+    if (audioCtx?.state !== 'running') return;
+    if (audioCtx.currentTime < audioUntil) sleepAudio();  // 還有提示音沒播完
+    else audioCtx.suspend().catch(() => {});
+  }, 1500 + Math.max(0, audioUntil - (audioCtx?.currentTime || 0)) * 1000);
+}
+function wakeAudio() {  // 點擊、按鍵時：還不能出聲就趁這時候啟動（Safari 一定要在使用者操作的當下）
+  if (audioOk || !settings?.sound) return;
+  audioContext()?.resume().then(sleepAudio, () => {});
+}
+async function playChime(kind, delay = 0) {
+  const ctx = audioContext();
+  if (!ctx) return;
+  if (ctx.state !== 'running') {
+    const asked = Date.now();
+    try { await ctx.resume(); } catch { return; }
+    if (Date.now() - asked > 2000) return sleepAudio();  // 一直等到使用者點了網頁才能出聲：已經過太久，不補播
+  }
+  audioUntil = Math.max(audioUntil, scheduleChime(ctx, kind, ctx.currentTime + 0.03 + delay));
+  sleepAudio();
+}
+function scheduleChime(ctx, kind, t0) {  // 排好一段提示音，回傳播完的時間
+  const { wave, notes } = CHIMES[kind];
+  const out = ctx.createGain();
+  out.gain.value = 0.25;
+  out.connect(ctx.destination);
+  let end = t0;
+  for (const [at, freq] of notes) {
+    const osc = ctx.createOscillator(), env = ctx.createGain(), start = t0 + at;
+    osc.type = wave;
+    osc.frequency.value = freq;
+    env.gain.setValueAtTime(0.0001, start);
+    env.gain.exponentialRampToValueAtTime(1, start + 0.015);
+    env.gain.exponentialRampToValueAtTime(0.0001, start + 0.7);
+    osc.connect(env).connect(out);
+    osc.start(start);
+    osc.stop(end = start + 0.72);
+  }
+  return end;
 }
 
 // ---------- 切換影片／圖片、API 與模型 ----------
@@ -2664,6 +2908,17 @@ function bindEvents() {
   $('#langSelect').addEventListener('change', e => saveSetting({ language: e.target.value }));
   $('#autoUpdate').addEventListener('change', e => saveSetting({ auto_update: e.target.checked }));
   $('#checkUpdate').addEventListener('click', checkUpdate);
+  $('#notifyOn').addEventListener('change', e => {
+    if (e.target.checked && notifyPermission() === 'default') askPermission();  // 打開的當下就問瀏覽器
+    saveSetting({ notify: e.target.checked });
+  });
+  $('#notifyTest').addEventListener('click', testNotify);
+  $('#soundOn').addEventListener('change', e => { saveSetting({ sound: e.target.checked }); wakeAudio(); });
+  $('#soundTest').addEventListener('click', () => { playChime('success'); playChime('failure', 0.9); });
+  document.addEventListener('click', wakeAudio, true);
+  document.addEventListener('keydown', wakeAudio, true);
+  // 在瀏覽器的網站設定改了通知權限：選項裡的說明跟著更新
+  navigator.permissions?.query({ name: 'notifications' }).then(p => { p.onchange = renderSettings; }, () => {});
   $('#keyForm').addEventListener('submit', async e => {
     e.preventDefault();
     const key = $('#keyInput').value.trim();
@@ -2716,6 +2971,7 @@ async function init() {
   $('#ttl').value = state.ttl;
   bindEvents();
   renderAll();
+  prepareLogo();
   try {
     const cfg = await api('/api/config');
     // 網頁每次都從磁碟讀，但舊的伺服器程式還在跑時會不認得 provider，全部送到 MixRoute
@@ -2728,6 +2984,7 @@ async function init() {
     version = cfg.version || null;
     update = cfg.update || null;
     if (settings) applyTheme();
+    if (settings?.sound) audioContext();  // 重新整理前點過網頁的話，Chrome 現在就能出聲
     if (cfg.outputs_dir) $('#outputsDir').textContent = `生成的影片、圖片和任務紀錄存放在 ${cfg.outputs_dir}`;
     if (update?.state === 'updated' && safeGet(NOTICED_KEY) !== update.current.sha) {
       toast(`已更新到 ${update.current.label}`);
