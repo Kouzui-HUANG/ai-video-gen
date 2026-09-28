@@ -10,10 +10,12 @@
   Wan 3.0（wan3.0-video），GMI 另有 Seedance 2.0（seedance-2-0-260128）、Seedance 2.5（seedance-2-5-260628）
   和 MiniMax H3（MiniMax-H3）。
   各模型的參數與素材限制在 video_models.py，網頁依它調整左邊的表單；切換時素材、提示詞和共用的參數都會保留。
-- 右上角切到「圖片」可以用 GMI 的 GPT Image 2.5（Sunburst、Flare）、GPT Image 2 和 Gemini 3 Pro Image（gmi_image.py）
-  生成圖片：GPT Image 沒有參考圖時送 -generate（文字生圖），有參考圖時送 -edit（改圖、合成）；Gemini 只有一個模型 ID，
-  有參考圖就一起送。參數與價格在 image_models.py；提示詞和參考圖和影片共用。
-  這些模型是同步的：送出後要等圖片生成完 GMI 才回應，所以伺服器先建一筆任務，在背景等結果再下載。
+- 右上角切到「圖片」可以用 GMI 的 GPT Image 2.5（Sunburst、Flare）、GPT Image 2、Gemini 3 Pro Image 和
+  Seedream 5.0 Pro（gmi_image.py）生成圖片：GPT Image 沒有參考圖時送 -generate（文字生圖），有參考圖時送 -edit
+  （改圖、合成）；Gemini、Seedream 只有一個模型 ID，有參考圖就一起送。參數與價格在 image_models.py；
+  提示詞和參考圖和影片共用。
+  GPT Image 和 Gemini 是同步的：送出後要等圖片生成完 GMI 才回應，所以伺服器先建一筆任務，在背景等結果再下載；
+  Seedream 是非同步的，送出後照影片的方式查到完成。
 - API key：優先用環境變數 MIXROUTE_API_KEY／GMI_API_KEY，沒有的話在網頁上輸入（只放在伺服器記憶體）。
 - MixRoute：本機圖片在瀏覽器處理後以 base64 直接送出，不經第三方；本機影片、音訊、文件會上傳到
   Litterbox (litterbox.catbox.moe) 取得臨時公開網址，到期自動刪除，期間拿到連結的人都能下載。
@@ -277,7 +279,8 @@ def check_gmi_key(key):
     models = [m for m in video_models.MODELS if m["provider"] == "gmi"]
     # 「API/模型」→ (查哪個模型的說明, 怎麼讀價格)；圖片模型的 generate 和 edit 價格相同，查 generate 就好
     lookups = {f"gmi/{m['id']}": (m["id"], gmi_video.parse_prices) for m in models}
-    image_parsers = {"sizes": gmi_image.parse_size_prices, "tiers": gmi_image.parse_tier_prices}
+    image_parsers = {"sizes": gmi_image.parse_size_prices, "tiers": gmi_image.parse_tier_prices,
+                     "flat": gmi_image.parse_flat_price}
     lookups.update({f"gmi/{m['id']}": (m["generate"], image_parsers.get(m["price_rule"], gmi_image.parse_prices))
                     for m in image_models.MODELS})
 
@@ -593,7 +596,7 @@ def create_task(body):
 
 # ---------- 圖片（GPT Image、Gemini） ----------
 IMAGE_PARAM_KEYS = ("size", "quality", "n", "output_format", "output_compression", "background", "moderation",
-                    "aspect_ratio", "image_size", "image_output_format")
+                    "aspect_ratio", "image_size", "image_output_format", "watermark")
 
 
 def image_spec_of(model):
@@ -628,7 +631,7 @@ def clean_image_parameters(p, spec, endpoint):
     """依圖片模型的設定檢查網頁送來的參數，回傳要放進 payload 的參數。endpoint 是 generate 或 edit：
     模型的這個端點不收的參數（extra_params 沒列的）直接不送，網頁上已經說明這次用什麼。"""
     label, extra = spec["label"], spec["extra_params"][endpoint]
-    if spec["sizing"] == "ratio":  # Gemini：只送比例和解析度，沒有品質和張數
+    if spec["sizing"] == "ratio":  # Gemini：只送比例和解析度
         if p.get("aspect_ratio") not in spec["ratios"]:
             raise ValueError(f"{label} 的比例只能是 {'、'.join(spec['ratios'])}")
         if p.get("image_size") not in spec["tiers"]:
@@ -642,9 +645,13 @@ def clean_image_parameters(p, spec, endpoint):
         problem = size_problem(w, h, spec["size"])
         if problem:
             raise ValueError(f"{label} 的輸出尺寸 {w}×{h} 不行：{problem}")
+        out = {"size": f"{w}x{h}"}
+    if spec["qualities"]:  # Gemini、Seedream 沒有品質
         quality = p.get("quality")
         if quality not in spec["qualities"]:  # 不收 auto：GMI 會按 max 計價
             raise ValueError(f"{label} 的品質只能是 {'、'.join(spec['qualities'])}")
+        out["quality"] = quality
+    if spec["n"]:  # 沒有 n 的模型一次一張
         try:
             n = int(p.get("n", 1))
         except (TypeError, ValueError):
@@ -652,7 +659,7 @@ def clean_image_parameters(p, spec, endpoint):
         rule = spec["n"]
         if not rule["min"] <= n <= rule["max"]:
             raise ValueError(f"{label} 一次可以生成 {rule['min']}-{rule['max']} 張")
-        out = {"size": f"{w}x{h}", "quality": quality, "n": n}
+        out["n"] = n
     fmt = "png"  # 不收 output_format 的端點輸出 PNG
     if "output_format" in extra:
         name = spec["format_param"]  # Gemini 叫 image_output_format
@@ -681,6 +688,8 @@ def clean_image_parameters(p, spec, endpoint):
         if not 0 <= compression <= 100:
             raise ValueError("壓縮品質必須是 0-100")
         out["output_compression"] = compression
+    if "watermark" in extra:  # Seedream：右下角的「AI generated」字樣
+        out["watermark"] = bool(p.get("watermark"))
     return out
 
 
@@ -858,8 +867,14 @@ def task_spec(task_id):
 def explain_image_failure(text, spec=None):
     """圖片任務常見的失敗原因加上中文說明。GPT Image 2 會說明原因，2.5 一律回 Generation rejected；
     Gemini 被 Google 擋下時，訊息裡有 Vertex AI 的 finishReason／blockReason（IMAGE_SAFETY、PROHIBITED_CONTENT…）。"""
-    if "failed to fetch image" in text:
-        return f"模型供應商下載不到參考圖：網址打不開、要登入才能看，或已經過期。\n原始訊息：{text}"
+    if re.search(r"failed to fetch image|Failed to download media", text, re.I):
+        return f"模型供應商下載不到參考圖：網址打不開、要登入才能看，或已經過期（失敗不收費）。\n原始訊息：{text}"
+    m = re.search(r"(Input|Output)(Text|Image)SensitiveContentDetected", text)
+    if m:  # Seedream（BytePlus）的內容審核
+        what = {("Input", "Text"): "提示詞", ("Input", "Image"): "參考圖", ("Output", "Image"): "生成的圖片",
+                ("Output", "Text"): "生成的內容"}[m.groups()]
+        return (f"BytePlus 判定{what}可能含有敏感內容，拒絕生成（失敗不收費）。"
+                f"請改寫提示詞或換參考圖再試。\n原始訊息：{text}")
     if re.search(r"safety system|moderation_blocked|content policy", text, re.I):
         return f"提示詞或參考圖沒通過 OpenAI 的內容審核，請改寫後再試。\n原始訊息：{text}"
     if re.search(r"IMAGE_SAFETY|PROHIBITED_CONTENT|BLOCKLIST|SPII|RECITATION|blockReason|finishReason\W+SAFETY", text):

@@ -604,7 +604,8 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
         <div class="seg" id="imgBgSeg"></div>
         <span class="label" id="imgOptLabel">選項</span>
         <div class="toggles" id="imgOptBox">
-          <label class="check" title="moderation: low：內容審核比較寬鬆，被擋下來的機會比較小"><input type="checkbox" id="imgModLow"> 寬鬆審核</label>
+          <label class="check" id="imgModBox" title="moderation: low：內容審核比較寬鬆，被擋下來的機會比較小"><input type="checkbox" id="imgModLow"> 寬鬆審核</label>
+          <label class="check" id="imgWatermarkBox" title="watermark：在圖片右下角加上「AI generated」字樣"><input type="checkbox" id="imgWatermark"> AI 浮水印</label>
         </div>
       </div>
     </section>
@@ -804,7 +805,7 @@ const IMAGE_CATALOG = (() => {
 })();
 // 圖片的參數和影片的分開記：ratio 是比例（ref＝跟 Image 1 一樣、custom＝自訂寬高），tier 是 image_models.py 的解析度。
 // 各模型共用：模型沒有的選項（例如 Gemini 沒有品質、不能自訂寬高）照樣記著，只在送出時換成這個模型能用的值
-const DEFAULT_IMAGE_PARAMS = { ratio: '1:1', tier: '1K', width: 1024, height: 1024, quality: 'medium', n: 1, format: 'png', compression: 100, background: 'auto', moderation: 'auto' };
+const DEFAULT_IMAGE_PARAMS = { ratio: '1:1', tier: '1K', width: 1024, height: 1024, quality: 'medium', n: 1, format: 'png', compression: 100, background: 'auto', moderation: 'auto', watermark: false };
 const QUALITY_LABEL = { low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' };
 const FORMAT_LABEL = { png: 'PNG', jpeg: 'JPEG', webp: 'WebP' };
 const BG_LABEL = { auto: '自動', transparent: '透明', opaque: '不透明' };
@@ -1689,23 +1690,26 @@ function ratioTier(s) {
   if (!tiers.includes(p.tier) && p.ratio !== 'custom') notes.push(`${s.label} 沒有 ${p.tier}，這次用 ${tier}`);
   return { ratio, tier, notes };
 }
-// 這次的輸出尺寸 { w, h, notes }；sizing 是 ratio 的模型另外有 ratio、tier
+// 這次的輸出尺寸 { w, h, tier, notes }；sizing 是 ratio 的模型另外有 ratio。
+// 記著的解析度這個模型沒有（Seedream 只有 2K）時用它的第一個，並說明
 function imageSize(s = IM()) {
   const p = state.imageParams, rule = s.size, notes = [];
   if (ratioSizing(s)) {
     const t = ratioTier(s), [w, h] = tierSize(s, t.ratio, t.tier);
     return { w, h, ...t };
   }
-  if (p.ratio === 'custom') return { w: Math.round(Number(p.width)) || 0, h: Math.round(Number(p.height)) || 0, notes };
-  if (p.ratio !== 'ref') { const [w, h] = tierSize(s, p.ratio, p.tier); return { w, h, notes }; }
+  if (p.ratio === 'custom') return { w: Math.round(Number(p.width)) || 0, h: Math.round(Number(p.height)) || 0, tier: p.tier, notes };
+  const tier = Object.hasOwn(s.tiers, p.tier) ? p.tier : Object.keys(s.tiers)[0];
+  if (tier !== p.tier) notes.push(`${s.label} 沒有 ${p.tier}，這次用 ${tier}`);
+  if (p.ratio !== 'ref') { const [w, h] = tierSize(s, p.ratio, tier); return { w, h, tier, notes }; }
   let r = refRatio();
   if (r == null) { notes.push('還沒有參考圖，比例先用 1:1'); r = 1; }
   const clamped = Math.min(rule.max_ratio, Math.max(1 / rule.max_ratio, r));
   if (Math.abs(clamped - r) > 1e-9) notes.push(`參考圖的長寬比超過 ${rule.max_ratio}:1，這次用 ${rule.max_ratio}:1`);
   // 參考圖的比例和指定尺寸的比例差不到 1%，就用指定的尺寸（GPT Image 2 才對得上有公開價格的尺寸）
-  const near = Object.entries(s.tier_sizes?.[p.tier] || {}).find(([k]) => Math.abs(ratioValue(k) / clamped - 1) < 0.01);
-  const [w, h] = near ? near[1].split('x').map(Number) : fitSize(clamped, s.tiers[p.tier] || Object.values(s.tiers)[0], rule);
-  return { w, h, notes };
+  const near = Object.entries(s.tier_sizes?.[tier] || {}).find(([k]) => Math.abs(ratioValue(k) / clamped - 1) < 0.01);
+  const [w, h] = near ? near[1].split('x').map(Number) : fitSize(clamped, s.tiers[tier], rule);
+  return { w, h, tier, notes };
 }
 const QUALITY_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 // 這次送 generate 還是 edit：有參考圖就是 edit（伺服器也是這樣選）
@@ -1754,12 +1758,15 @@ function effectiveImageParams(s = IM()) {
   if (extra.includes('output_compression') && (format === 'jpeg' || format === 'webp')) {
     params.output_compression = int(p.compression, 0, 100, d.output_compression);
   }
-  return { params, notes, w, h, format, endpoint };
+  if (extra.includes('watermark')) params.watermark = !!p.watermark;
+  else if (p.watermark) notes.push(`${s.label} 不能加 AI 浮水印，這次不會加`);
+  return { params, notes, w, h, tier: size.tier, format, endpoint };
 }
 // 每張的價格（美元），p 是送出的參數。pixels：1024×1024 的價格按像素數換算；sizes：只有列出來的尺寸有價格，其他是 null；
-// tiers：看解析度（image_size）
+// tiers：看解析度（image_size）；flat：不分尺寸
 function imagePrice(s, p) {
   const prices = state.prices[specKey(s)] || s.prices;
+  if (s.price_rule === 'flat') return prices.image ?? null;
   if (s.price_rule === 'tiers') return prices[p.image_size] ?? null;
   const [w, h] = String(p.size).split('x').map(Number);
   if (!(w > 0 && h > 0)) return null;
@@ -1796,7 +1803,8 @@ function imageUsageText(t) {
     const per = imagePrice(s, p), refs = (t.media || []).filter(m => m.type === 'reference_image').length;
     if (per != null) cost = per * (taskFiles(t).length || p.n || 1) + refs * (s.ref_price || 0);
   }
-  const tokens = u && (u.input_tokens != null || u.output_tokens != null)
+  // OpenAI 的用量才有 input_tokens；BytePlus（Seedream）的用量只有 output_tokens 和張數，不顯示
+  const tokens = u?.input_tokens != null
     ? `用量：輸入 ${(u.input_tokens || 0).toLocaleString()}、輸出 ${(u.output_tokens || 0).toLocaleString()} tokens` : '';
   if (cost == null) return tokens;
   return tokens ? `${tokens}，約 ${fmtUsd(cost)}` : `費用約 ${fmtUsd(cost)}（GMI 公布的價格）`;
@@ -1828,14 +1836,18 @@ function renderImageParams() {
   const custom = !fixed && p.ratio === 'custom';
   $('#imgTierSeg').hidden = custom;
   $('#imgCustom').hidden = !custom;
-  const tierOn = fixed ? e.params.image_size : p.tier;
-  $('#imgTierSeg').replaceChildren(...Object.keys(s.tiers).map(t => segButton(t, tierOn === t, () => setImageParams({ tier: t }))));
-  for (const [id, v] of [['#imgW', p.width], ['#imgH', p.height]]) if (document.activeElement !== $(id)) $(id).value = v;
+  // 按下的是這次實際用的解析度（記著的這個模型沒有時，見 imageSize、ratioTier）
+  $('#imgTierSeg').replaceChildren(...Object.keys(s.tiers).map(t => segButton(t, e.tier === t, () => setImageParams({ tier: t }))));
+  for (const [id, v] of [['#imgW', p.width], ['#imgH', p.height]]) {
+    if (s.size) $(id).max = s.size.max_side;
+    if (document.activeElement !== $(id)) $(id).value = v;
+  }
   const problem = fixed ? '' : sizeProblem(e.w, e.h, s.size), note = $('#imgSizeNote'), cost = imageCost(s, e);
+  // 沒有品質選項的模型（Gemini、Seedream）價格寫在這裡，有品質的寫在品質下面
   note.textContent = `輸出 ${e.w}×${e.h}（${(e.w * e.h / 1e6).toFixed(1)} MP）` + (problem ? `：${problem}` : '')
-    + (fixed ? (cost ? `，每張 ${fmtUsd(cost.per)}` : '') + '。尺寸由模型依比例和解析度決定' : '');
+    + (!s.qualities.length && !problem && cost ? `，每張 ${fmtUsd(cost.per)}` : '') + (fixed ? '。尺寸由模型依比例和解析度決定' : '');
   note.style.color = problem ? 'var(--err)' : '';
-  // 沒有品質（Gemini）、一次只能一張的模型：整列藏起來，記著的值留給其他模型
+  // 沒有品質（Gemini、Seedream）、一次只能一張的模型：整列藏起來，記著的值留給其他模型
   $('#imgQualityLabel').hidden = $('#imgQualitySeg').hidden = $('#imgQualityNote').hidden = !s.qualities.length;
   $('#imgQualitySeg').replaceChildren(...s.qualities.map(q => segButton(QUALITY_LABEL[q] || q, e.params.quality === q, () => setImageParams({ quality: q }))));
   $('#imgQualityNote').textContent = e.params.quality + (problem ? '' : cost ? `：這個尺寸約 ${fmtUsd(cost.per)}／張` : '：GMI 沒有公開這個尺寸的價格')
@@ -1865,8 +1877,12 @@ function renderImageParams() {
     }
     return btn;
   }));
-  $('#imgOptLabel').hidden = $('#imgOptBox').hidden = !(s.moderation.length > 0 && extra.includes('moderation'));
+  const modOk = s.moderation.length > 0 && extra.includes('moderation'), wmOk = extra.includes('watermark');
+  $('#imgModBox').hidden = !modOk;
+  $('#imgWatermarkBox').hidden = !wmOk;
+  $('#imgOptLabel').hidden = $('#imgOptBox').hidden = !(modOk || wmOk);
   $('#imgModLow').checked = p.moderation === 'low';
+  $('#imgWatermark').checked = !!p.watermark;
 }
 
 // ---------- 檢查 ----------
@@ -1978,10 +1994,11 @@ function collectImageIssues() {
   if (problem) {
     // 尺寸不合規則，不估價
   } else if (cost) {
-    const what = ratioSizing(s) ? `${e.params.aspect_ratio}、${e.params.image_size}（${e.w}×${e.h}）` : `${e.w}×${e.h}、品質 ${e.params.quality} `;
+    const what = ratioSizing(s) ? `${e.params.aspect_ratio}、${e.params.image_size}（${e.w}×${e.h}）`
+      : `${e.w}×${e.h}${e.params.quality ? `、品質 ${e.params.quality}` : ''} `;
     add('info', `${P().label} 預估費用：${what}約 ${fmtUsd(cost.per)}／張 × ${e.params.n || 1} 張`
       + (cost.refs && s.ref_price ? ` ＋ 參考圖 ${cost.refs} 張` : '') + ` ≈ ${fmtUsd(cost.total)}`
-      + (['sizes', 'tiers'].includes(s.price_rule) ? '（GMI 公布的每張價格）' : '（建立請求時預扣，預扣的就是實際費用）'));
+      + (['sizes', 'tiers', 'flat'].includes(s.price_rule) ? '（GMI 公布的每張價格）' : '（建立請求時預扣，預扣的就是實際費用）'));
   } else if (s.price_rule === 'sizes') {
     add('warn', `GMI 沒有公開 ${s.label} ${e.w}×${e.h} 的價格，實際費用請到 GMI 後台確認`
       + `（品質 ${e.params.quality} 有公開的：${knownPrices(s, e.params.quality)}）`);
@@ -2107,13 +2124,14 @@ function taskChips(t) {
   const provider = t.provider || 'mixroute';
   const providerLabel = Object.hasOwn(PROVIDERS, provider) ? PROVIDERS[provider].label : provider;
   if (t.kind === 'image') {
-    // GPT Image 看模型 ID（…-edit）；Gemini 改圖和文字生圖是同一個 ID，看有沒有參考圖
+    // GPT Image 看模型 ID（…-edit）；Gemini、Seedream 改圖和文字生圖是同一個 ID，看有沒有參考圖
     const edit = /-edit$/.test(t.model || '') || (t.media || []).some(m => m.type === 'reference_image');
     const parts = [providerLabel, imageSpecOf(t)?.label || t.model, edit ? '改圖' : '文字生圖'];
-    if (p.size) parts.push(p.size.replace('x', '×'), `品質 ${p.quality}`, `${p.n || 1} 張`, FORMAT_LABEL[p.output_format] || p.output_format);
+    if (p.size) parts.push(p.size.replace('x', '×'), p.quality && `品質 ${p.quality}`, imageSpecOf(t)?.n && `${p.n || 1} 張`, FORMAT_LABEL[p.output_format] || p.output_format);
     else if (p.image_size) parts.push(p.aspect_ratio, p.image_size, FORMAT_LABEL[p.image_output_format] || p.image_output_format);
     if (p.background && p.background !== 'auto') parts.push(`${BG_LABEL[p.background] || p.background}背景`);
     if (p.moderation === 'low') parts.push('寬鬆審核');
+    if (p.watermark) parts.push('AI 浮水印');
     return h('div', { class: 'meta-chips' }, parts.filter(Boolean).map(text => h('span', { text })));
   }
   const parts = [providerLabel, modelLabel(t.model || DEFAULT_MODEL)];
@@ -2332,27 +2350,28 @@ function reuseImageTask(t) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   toast(`已載入這個任務的設定（${spec.label}）`);
 }
-// 任務紀錄的參數（size 是 WxH）換回表單的設定：尺寸對得上某個比例＋解析度就選它，不然用自訂寬高。
-// Gemini 的任務（aspect_ratio、image_size）只換比例、解析度和格式，品質、張數等其他模型的設定維持目前的
+// 任務紀錄的參數換回表單的設定：size（WxH）對得上某個比例＋解析度就選它，不然用自訂寬高；Gemini 的任務是
+// aspect_ratio、image_size。任務裡沒有的設定（例如 Gemini、Seedream 沒有品質和張數）維持目前的，留給其他模型
 function imageParamsFrom(p, spec) {
-  if (!p.size) {
-    const cur = state.imageParams;
-    return { ...cur, ratio: p.aspect_ratio || cur.ratio, tier: p.image_size || cur.tier, format: p.image_output_format || cur.format };
-  }
-  const [w, h] = String(p.size).split('x').map(Number);
-  let ratio = 'custom', tier = state.imageParams.tier;
-  for (const r of spec.ratios) {
-    for (const t of Object.keys(spec.tiers)) {
-      const [W, H] = tierSize(spec, r, t);
-      if (W === w && H === h && ratio === 'custom') { ratio = r; tier = t; }
+  const out = { ...state.imageParams };
+  if (p.size) {
+    const [w, h] = String(p.size).split('x').map(Number);
+    Object.assign(out, { ratio: 'custom', width: w || out.width, height: h || out.height });
+    for (const r of spec.ratios) {
+      for (const t of Object.keys(spec.tiers)) {
+        const [W, H] = tierSize(spec, r, t);
+        if (W === w && H === h && out.ratio === 'custom') Object.assign(out, { ratio: r, tier: t });
+      }
     }
+  } else {
+    if (p.aspect_ratio) out.ratio = p.aspect_ratio;
+    if (p.image_size) out.tier = p.image_size;
   }
-  const d = spec.defaults;
-  return {
-    ...DEFAULT_IMAGE_PARAMS, ratio, tier, width: w || 1024, height: h || 1024, quality: p.quality || d.quality, n: p.n || d.n,
-    format: p.output_format || d.output_format, compression: p.output_compression ?? d.output_compression,
-    background: p.background || d.background, moderation: p.moderation || d.moderation,
-  };
+  const format = p.output_format || p.image_output_format;
+  if (format) out.format = format;
+  if (p.output_compression != null) out.compression = p.output_compression;
+  for (const k of ['quality', 'n', 'background', 'moderation', 'watermark']) if (p[k] != null) out[k] = p[k];
+  return out;
 }
 
 // ---------- 生成的圖片：放大檢視，拿去繼續編輯或做成影片 ----------
@@ -2813,7 +2832,8 @@ function setModel(id) {
 function modelSummary(m) {
   if (m.kind === 'image') {
     const size = ratioSizing(m) ? `比例 ${m.ratios.length} 種、${Object.keys(m.tiers).join('／')}`
-      : `品質 ${m.qualities.length} 級、每邊最大 ${m.size.max_side} px`;
+      : m.qualities.length ? `品質 ${m.qualities.length} 級、每邊最大 ${m.size.max_side} px`
+      : `最大 ${(m.size.max_pixels / 1e6).toFixed(1)} MP`;
     return `${m.label}：${m.summary}；參考圖最多 ${m.media.reference_image} 張、${size}`;
   }
   const n = t => m.media[t] || 0;
@@ -2913,10 +2933,12 @@ function bindEvents() {
   });
   $('#imgCompression').addEventListener('change', e => setImageParams({ compression: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) }));
   $('#imgModLow').addEventListener('change', e => setImageParams({ moderation: e.target.checked ? 'low' : 'auto' }));
+  $('#imgWatermark').addEventListener('change', e => setImageParams({ watermark: e.target.checked }));
   $('#resetImageParams').addEventListener('click', () => {  // 模型沒有的設定（Gemini 沒有品質、張數…）用共用的預設
     const d = IM().defaults, D = DEFAULT_IMAGE_PARAMS;
     setImageParams({ ...D, quality: d.quality ?? D.quality, n: d.n ?? D.n, format: d.output_format ?? D.format,
-      compression: d.output_compression ?? D.compression, background: d.background ?? D.background, moderation: d.moderation ?? D.moderation });
+      compression: d.output_compression ?? D.compression, background: d.background ?? D.background, moderation: d.moderation ?? D.moderation,
+      watermark: d.watermark ?? D.watermark });
   });
 
   // 放大檢視生成的圖片

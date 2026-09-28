@@ -1,4 +1,5 @@
-"""GMI Cloud 的圖片生成（request queue API）：GPT Image 2.5（Sunburst、Flare）、GPT Image 2 和 Gemini 3 Pro Image。
+"""GMI Cloud 的圖片生成（request queue API）：GPT Image 2.5（Sunburst、Flare）、GPT Image 2、Gemini 3 Pro Image
+和 Seedream 5.0 Pro。
 
 模型說明：GET {BASE_URL}/models/<model>（公開文件站 2026-09 還沒有 2.5，參數和
 https://docs.gmicloud.ai/model-quickstarts/image/gpt-image-2-edit 同一套；Gemini 見
@@ -8,6 +9,8 @@ https://docs.gmicloud.ai/model-quickstarts/image/gemini-3-pro-image）。
 - GPT Image 分成 -generate（文字生圖）和 -edit（參考圖編輯）；edit 的 image 可以是網址、base64 data URI，或最多 16 個的陣列。
 - Gemini 3 Pro Image 只有一個 ID，image（最多 14 個網址的陣列）是選填；尺寸只送 aspect_ratio 和 image_size，
   輸出格式叫 image_output_format。payload 一樣是 prompt ＋ 參數 ＋ image，回應一樣是 outcome.media_urls。
+- Seedream 5.0 Pro 也只有一個 ID，參數是 size（寬x高）、output_format、watermark。它是非同步模型：
+  POST /requests 馬上回傳 request_id（status queued），create() 照樣回傳，由呼叫的一方用 gmi_video.wait_for_task 查到完成。
 - GPT Image 2 的錯誤訊息比較具體（例如「size dimensions must be multiples of 16」「failed to fetch image」），
   2.5 的錯誤一律是下面那句 Generation rejected。
 - 同步模型（模型說明的 delivery_mode 是 sync）：POST /requests 要等圖片生成完才回應，成功時回傳的請求物件裡
@@ -64,6 +67,12 @@ def parse_tier_prices(info):
         for tier in re.split(r"\s*/\s*", tiers):
             prices[tier.upper()] = float(price)
     return prices
+
+
+def parse_flat_price(info):
+    """不分尺寸、每張同價的模型（Seedream 5.0 Pro）：「$0.085 per image」→ {"image": 0.085}。"""
+    m = re.search(r"\$\s*(\d+(?:\.\d+)?)\s*per\s+image", str(info.get("pricing_details") or ""), re.I)
+    return {"image": float(m.group(1))} if m else {}
 
 
 def build_payload(prompt, parameters, images=()):

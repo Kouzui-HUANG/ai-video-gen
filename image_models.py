@@ -1,4 +1,4 @@
-"""GMI Cloud 上能用的圖片模型（GPT Image 2.5、GPT Image 2、Gemini 3 Pro Image），以及參數範圍與價格。
+"""GMI Cloud 上能用的圖片模型（GPT Image 2.5、GPT Image 2、Gemini 3 Pro Image、Seedream 5.0 Pro），以及參數範圍與價格。
 
 網頁（video_ui.html）的「圖片」模式依這份資料畫出參數表單、即時檢查和估價；伺服器（video_ui.py）送出前用同一份資料再檢查一次。
 模型說明：GET https://console.gmicloud.ai/api/v1/ie/requestqueue/apikey/models/<model>
@@ -10,6 +10,7 @@ GPT Image 在 GMI 上拆成兩個 ID：沒有參考圖時送 generate（文字�
 Sunburst 和 Flare 的參數、價格完全相同，差別只在上游的模型（Sunburst 細節和改圖精準度最好，Flare 最快）。
 GPT Image 2 是上一代，參數比較少，價格按尺寸分級（見 GPT_IMAGE_2 上面的說明）。
 Gemini 3 Pro Image 只有一個 ID，也不能指定寬高，只選比例和解析度（見 GEMINI_3_PRO_IMAGE 上面的說明）。
+Seedream 5.0 Pro 也只有一個 ID，尺寸和 GPT Image 一樣送寬x高，是非同步模型（見 SEEDREAM_50_PRO 上面的說明）。
 
 欄位：
 - generate／edit：兩個 GMI 模型 ID（只有一個 ID 的模型兩個一樣）；summary：模型選單的說明。
@@ -24,12 +25,12 @@ Gemini 3 Pro Image 只有一個 ID，也不能指定寬高，只選比例和解�
   sizing 是 ratio 的模型用來顯示實際會輸出的尺寸）。
 - qualities：品質（空的＝沒有這個參數）。auto 不列出來：GMI 對 auto（或不送）一律按最高品質計價。
 - extra_params：除了 prompt、image、尺寸、quality、n 以外，generate／edit 各收哪些參數（output_format、output_compression、
-  background、moderation）；沒列的不送，網頁上會說明這次用什麼。format_param：輸出格式在 payload 裡的名稱。
+  background、moderation、watermark）；沒列的不送，網頁上會說明這次用什麼。format_param：輸出格式在 payload 裡的名稱。
 - formats：輸出格式；transparent_formats：能輸出透明背景的格式；backgrounds、moderation：可選的值（空的＝不支援）；
   n：一次生成幾張（None＝沒有這個參數，一次一張）；defaults：「恢復預設」和模型不支援使用者的選擇時用的值。
 - price_rule、prices：每張的價格（美元）。"pixels"：prices 是 1024×1024 的價格，其他尺寸按像素數等比例換算；
   "sizes"：prices 是「寬x高（小的在前）→ 品質 → 價格」，沒列的尺寸 GMI 接受但沒有公開價格；
-  "tiers"：prices 是「解析度 → 價格」。
+  "tiers"：prices 是「解析度 → 價格」；"flat"：不分尺寸，prices 只有 {"image": 每張的價格}。
   GMI 建立請求時預扣費用。驗證 key 時會用模型說明的 pricing_details 更新 prices。
 - ref_price：edit 每張參考圖（最多）加收的費用；token_prices：每百萬 token 的價格（text＝提示詞，約 3 bytes 一個 token；
   image＝參考圖；output＝生成的圖），按 token 計價的模型才有。生成完 GMI 會回報實際用量（outcome.request_usage），
@@ -142,4 +143,44 @@ GEMINI_3_PRO_IMAGE = {
     "ref_price": 0.0011, "token_prices": None,
 }
 
-MODELS = [GPT_IMAGE_25_SUNBURST, GPT_IMAGE_25_FLARE, GPT_IMAGE_2, GEMINI_3_PRO_IMAGE]  # 網頁的模型選單照這個順序
+# Seedream 5.0 Pro（字節跳動，BytePlus 的 dola-seedream-5-0-pro-260628；GMI 經 BytePlus ModelArk 呼叫）。2026-09：
+# - GMI 的模型說明和文件是從 seedream-5.0-lite 複製的（寫著 3K、組圖、14 張參考圖、3.6M–10.4M 像素），
+#   和 BytePlus 官方的 5.0 pro 規格不同（https://docs.byteplus.com/en/docs/ModelArk/2582774）：
+#   官方是 1K／1.5K／2K、寬x高的總像素 921,600–4,624,220、長寬比 1/16–16、參考圖最多 10 張（每張 ≤ 30 MB）、
+#   沒有組圖（sequential_image_generation）。這裡以官方為準，再和 GMI 寫的取交集。
+# - 只有一個 ID，image（網址陣列）是選填：有參考圖就是改圖、合成。
+# - 尺寸一律送寬x高：GMI 寫「up to 4.19M」，列出的 2K 尺寸（tier_sizes）都 ≤ 2048×2048，上限就用 4,194,304。
+#   不送 "2K" 這種解析度字串：那樣比例要寫在提示詞裡，由模型決定。1K、1.5K 在 GMI 上價格一樣，先不列。
+# - 沒有品質、背景、內容審核的參數；一次一張；watermark 預設不加（GMI 的預設也是 false）。
+# - 非同步（delivery_mode async）：送出後拿到 request_id，再查到完成。GMI 文件寫 sync，兩種都照樣處理。
+# - 價格：每張 $0.085，不分尺寸。
+SEEDREAM_50_PRO = {
+    "kind": "image", "provider": "gmi",
+    "id": "seedream-5.0-pro", "label": "Seedream 5.0 Pro",
+    "generate": "seedream-5.0-pro", "edit": "seedream-5.0-pro",
+    "summary": "字節跳動的新一代生圖模型：畫質高，擅長多張參考圖合成和圖中文字；一次一張",
+    "prompt_required": True, "prompt_max": None,
+    "media": {"reference_image": 10}, "media_total": 10,
+    "labels": {"image": "Image "},
+    "image": {"formats": ["jpg", "png"], "max_mb": 30, "max_ratio": 16, "max_pixels": 36_000_000},
+    "clip": {}, "clip_sum": {},
+    "sizing": "pixels",
+    # 總像素和長寬比限制下，最長的一邊是 8192（8192×512）
+    "size": {"multiple": 16, "max_side": 8192, "max_ratio": 16, "min_pixels": 921_600, "max_pixels": 4_194_304},
+    "ratios": ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9"],
+    "tiers": {"2K": {"pixels": 2048 * 2048}},
+    "tier_sizes": {"2K": {"1:1": "2048x2048", "4:3": "2352x1760", "3:4": "1760x2352", "3:2": "2496x1664",
+                          "2:3": "1664x2496", "16:9": "2720x1536", "9:16": "1536x2720", "21:9": "3120x1344"}},
+    "qualities": [], "n": None,
+    "extra_params": {"generate": ["output_format", "watermark"], "edit": ["output_format", "watermark"]},
+    "format_param": "output_format",
+    "formats": ["png", "jpeg"], "transparent_formats": [],
+    "backgrounds": [], "moderation": [],
+    "defaults": {"output_format": "png", "watermark": False},
+    "notes": {},
+    "price_rule": "flat",
+    "prices": {"image": 0.085},
+    "ref_price": 0, "token_prices": None,
+}
+
+MODELS = [GPT_IMAGE_25_SUNBURST, GPT_IMAGE_25_FLARE, GPT_IMAGE_2, GEMINI_3_PRO_IMAGE, SEEDREAM_50_PRO]  # 網頁的模型選單照這個順序

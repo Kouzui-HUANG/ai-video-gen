@@ -1,12 +1,12 @@
 # AI 影片生成
 
-一個在本機執行的 AI 影片和圖片生成工具。透過瀏覽器介面整合 MixRoute 與 GMI Cloud，可使用文字、參考圖片、影片、音訊、首尾幀等素材建立生成任務，並在完成後自動下載 MP4；也能切到「圖片」，用 GMI 的 GPT Image 2.5、GPT Image 2 或 Gemini 3 Pro Image 生成或修改圖片。
+一個在本機執行的 AI 影片和圖片生成工具。透過瀏覽器介面整合 MixRoute 與 GMI Cloud，可使用文字、參考圖片、影片、音訊、首尾幀等素材建立生成任務，並在完成後自動下載 MP4；也能切到「圖片」，用 GMI 的 GPT Image 2.5、GPT Image 2、Gemini 3 Pro Image 或 Seedream 5.0 Pro 生成或修改圖片。
 
 ## 功能
 
 - 在同一個介面切換 MixRoute 與 GMI Cloud
 - 支援 Wan 3.0、Seedance 2.0、Seedance 2.5 與 MiniMax H3
-- 切換「影片／圖片」：用 GPT Image 2.5（Sunburst、Flare）、GPT Image 2 或 Gemini 3 Pro Image 文字生圖，或依參考圖修改、合成；提示詞和參考圖兩邊共用
+- 切換「影片／圖片」：用 GPT Image 2.5（Sunburst、Flare）、GPT Image 2、Gemini 3 Pro Image 或 Seedream 5.0 Pro 文字生圖，或依參考圖修改、合成；提示詞和參考圖兩邊共用
 - 生成的圖片可一鍵拿去繼續編輯，或當成影片的參考圖、首幀、尾幀
 - 提供「參考生成」與「首尾幀」兩種模式
 - 支援拖放、選取、貼上圖片或加入公開網址
@@ -37,8 +37,9 @@
 | GPT Image 2.5 Flare | 同上 | 同上 | 同上 | 最快，價格和 Sunburst 相同 |
 | GPT Image 2 | 同上 | 同上 | 低、中、高 | 上一代；不能透明背景，文字生圖可輸出 PNG／JPEG、改圖只輸出 PNG；價格較高，而且只公開 1024×1024、1024×1536、1536×1024 的價格 |
 | Gemini 3 Pro Image | 沒有參考圖時文字生圖；有參考圖（最多 14 張、每張 ≤ 7 MB）時照提示詞修改或合成 | 只能選比例（1:1、4:5、5:4、3:4、4:3、9:16、16:9、21:9）和 1K／2K／4K，例如 16:9 的 1K 是 1376×768 | 沒有品質選項 | Google 的 Nano Banana Pro；一次一張，輸出 PNG 或 JPEG；提示詞建議 2000 字以內 |
+| Seedream 5.0 Pro | 沒有參考圖時文字生圖；有參考圖（最多 10 張、每張 ≤ 30 MB）時照提示詞修改或合成 | 比例＋2K（例如 16:9 是 2720×1536），或自訂寬高：總像素 0.92–4.19 MP、長寬比 ≤ 16:1 | 沒有品質選項 | 字節跳動（BytePlus）的模型；一次一張，輸出 PNG 或 JPEG，可加「AI 浮水印」；非同步，送出後會自動查到完成 |
 
-GMI 把每個 GPT Image 模型拆成 `-generate`（文字生圖）與 `-edit`（改圖）兩個 ID，介面會依有沒有參考圖自動選用；Gemini 3 Pro Image 只有一個 ID，有參考圖就一起送。GPT Image 的尺寸可選比例（1:1、16:9、跟參考圖相同…）加 1K／2K／4K，或自訂寬高；一次可生成 1–10 張，輸出 PNG、JPEG 或 WebP，PNG／WebP 可以有透明背景（GPT Image 2 的限制見上表）。換到不支援目前設定的模型時（例如 GPT Image 2 沒有「最高」品質、Gemini 沒有 2:3 也不能自訂寬高），設定本身不會被改掉，送出時才換成可用的值（Gemini 用最接近的比例），並在檢查區說明。
+GMI 把每個 GPT Image 模型拆成 `-generate`（文字生圖）與 `-edit`（改圖）兩個 ID，介面會依有沒有參考圖自動選用；Gemini 3 Pro Image 和 Seedream 5.0 Pro 只有一個 ID，有參考圖就一起送。GPT Image 的尺寸可選比例（1:1、16:9、跟參考圖相同…）加 1K／2K／4K，或自訂寬高；一次可生成 1–10 張，輸出 PNG、JPEG 或 WebP，PNG／WebP 可以有透明背景（GPT Image 2 的限制見上表）。換到不支援目前設定的模型時（例如 GPT Image 2 沒有「最高」品質、Gemini 沒有 2:3 也不能自訂寬高、Seedream 只有 2K），設定本身不會被改掉，送出時才換成可用的值（Gemini 用最接近的比例），並在檢查區說明。
 
 介面會依目前的 API 與模型顯示實際可用選項。完整限制集中定義在 `video_models.py`（影片）與 `image_models.py`（圖片）。
 
@@ -147,15 +148,15 @@ App 啟動的伺服器會在網頁關閉、沒有進行中任務且閒置 10 分
 
 ### 生成圖片
 
-1. 在右上角把「生成」切到「圖片」，選 GPT Image 2.5 Sunburst、Flare、GPT Image 2 或 Gemini 3 Pro Image（API 固定是 GMI Cloud）。
+1. 在右上角把「生成」切到「圖片」，選 GPT Image 2.5 Sunburst、Flare、GPT Image 2、Gemini 3 Pro Image 或 Seedream 5.0 Pro（API 固定是 GMI Cloud）。
 2. 輸入提示詞。要修改或合成圖片時加入參考圖，在提示詞用「Image 1」「Image 2」指稱。
-3. 設定比例與尺寸、品質、張數、格式與背景（Gemini 只有比例、解析度和格式）；檢查區會顯示這次用哪個模型 ID 和預估費用。
+3. 設定比例與尺寸、品質、張數、格式與背景（Gemini 只有比例、解析度和格式；Seedream 沒有品質和張數，可加 AI 浮水印）；檢查區會顯示這次用哪個模型 ID 和預估費用。
 4. 按「生成圖片」。圖片生成完會自動下載到 `outputs/`，並顯示在右側任務區。
 5. 點圖片可以放大檢視，並選擇「繼續編輯這張」「當影片參考圖」「當影片首幀」或「當影片尾幀」。
 
 提示詞與參考圖片在影片和圖片之間共用，切換時不會消失；影片和圖片的其他參數各自保留。
 
-GPT Image 2.5、GPT Image 2 和 Gemini 3 Pro Image 都是同步模型：GMI 要等圖片生成完才回應，通常需要十幾秒到數分鐘。等待期間連線中斷或伺服器重啟時，程式會從 GMI 的請求列表找回同一個請求，不會重新送出、重複收費。
+GPT Image 2.5、GPT Image 2 和 Gemini 3 Pro Image 都是同步模型：GMI 要等圖片生成完才回應，通常需要十幾秒到數分鐘。等待期間連線中斷或伺服器重啟時，程式會從 GMI 的請求列表找回同一個請求，不會重新送出、重複收費。Seedream 5.0 Pro 是非同步模型：送出後馬上拿到 request ID，再像影片一樣查到完成，伺服器重啟後會接著查。
 
 ## 選項與自動更新
 
@@ -249,7 +250,7 @@ outputs/
 ├── video_ui.py        # 本機 HTTP 伺服器、任務管理、素材處理與下載
 ├── video_ui.html      # 瀏覽器介面
 ├── video_models.py    # 影片模型能力、預設值與素材限制
-├── image_models.py    # 圖片模型（GPT Image 2.5、GPT Image 2、Gemini 3 Pro Image）的參數範圍與價格
+├── image_models.py    # 圖片模型（GPT Image 2.5、GPT Image 2、Gemini 3 Pro Image、Seedream 5.0 Pro）的參數範圍與價格
 ├── mixroute_video.py  # MixRoute API 實作與 CLI
 ├── gmi_video.py       # GMI Cloud API、上傳與狀態轉換
 ├── gmi_image.py       # GMI Cloud 圖片生成（同步請求、找回請求、下載）
@@ -330,6 +331,7 @@ GMI 會把上游拒絕的原因統一回報成這句話。常見原因是提示�
 - [GMI Cloud gpt-image-2-edit](https://docs.gmicloud.ai/model-quickstarts/image/gpt-image-2-edit)（GPT Image 2.5 沿用相同格式；這頁的價格表已經過時，兩代的完整說明與目前價格在 GMI 主控台的模型頁）
 - [OpenAI GPT-Image-2.5 Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst)
 - [GMI Cloud gemini-3-pro-image](https://docs.gmicloud.ai/model-quickstarts/image/gemini-3-pro-image)（各比例、解析度實際輸出的尺寸見 [Google 的圖片生成文件](https://ai.google.dev/gemini-api/docs/image-generation)）
+- [GMI Cloud seedream-5.0-pro](https://docs.gmicloud.ai/model-quickstarts/image/seedream-5-0-pro)（2026-09 這頁和模型說明是從 5.0 lite 複製的，3K、組圖、14 張參考圖都是 lite 的規格；5.0 pro 的實際規格見 [BytePlus 的 Seedream 5.0 pro 教學](https://docs.byteplus.com/en/docs/ModelArk/2582774)）
 
 影片和圖片生成都會使用供應商額度並可能產生費用；送出前請確認目前價格與帳戶餘額。
 
@@ -338,3 +340,5 @@ GPT Image 2.5 的費用在 GMI 建立請求時預扣，預扣金額就是實際�
 GPT Image 2 按尺寸計價，GMI 目前公開的每張價格為：1024×1024 低 $0.010、中 $0.060、高 $0.220；1024×1536／1536×1024 低 $0.020、中 $0.120、高 $0.440。介面的比例選 1:1、2:3、3:2 加 1K 時會對上這些尺寸；其他尺寸 GMI 也接受，但沒有公開價格，檢查區會提醒，實際費用請到 GMI 後台確認。
 
 Gemini 3 Pro Image 按解析度計價：1K、2K 每張 $0.134，4K 每張 $0.24；改圖時每張參考圖另加 $0.0011。
+
+Seedream 5.0 Pro 每張 $0.085，不分尺寸。
