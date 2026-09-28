@@ -762,6 +762,8 @@ const AUDIO_EXT = ['wav', 'mp3'];
 const DOC_EXT = ['pdf', 'pptx', 'ppt', 'xlsx', 'xls', 'txt', 'md', 'key', 'pages', 'numbers'];
 const FAILED = new Set(['FAILURE', 'FAILED', 'EXPIRED', 'CANCELED', 'CANCELLED', 'UNKNOWN']);
 const MB = 1 << 20;
+// 說明文字裡的貼上快捷鍵：Mac 是 ⌘V，Windows 和其他系統是 Ctrl+V
+const PASTE_KEY = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || '') ? '⌘V' : 'Ctrl+V';
 // 各模型共用的參數：換模型時沿用，模型不支援的值（例如 Seedance 沒有 1080P）只在送出時換成可用的值，這裡不會被改掉。
 // 「產生音軌」各模型的預設不同，另外記在 state.audio
 const DEFAULT_PARAMS = { resolution: '480P', ratio: '16:9', duration: 2, auto: false, prompt_extend: false, watermark: false, web_search: false, seed: '' };
@@ -1398,11 +1400,11 @@ function addTile(slot, text) {
   return h('button', { class: 'add-tile', type: 'button', onclick: () => pickFiles(slot) }, h('span', { class: 'plus', text: '+' }), h('span', { text }));
 }
 const tiles = {
-  image: addTile('image', '拖放、點選或 ⌘V 貼上圖片'),
+  image: addTile('image', `拖放、點選或 ${PASTE_KEY} 貼上圖片`),
   video: addTile('video', '拖放或點選影片檔（MP4／MOV）'),
   audio: addTile('audio', '拖放或點選音訊檔（WAV／MP3）'),
   file: addTile('file', '拖放或點選文件'),
-  first: addTile('first', '拖放、點選或 ⌘V 貼上首幀'),
+  first: addTile('first', `拖放、點選或 ${PASTE_KEY} 貼上首幀`),
   last: addTile('last', '拖放、點選或貼上尾幀'),
 };
 
@@ -1459,7 +1461,7 @@ function renderSpec() {
   if (isImage()) {
     const s = IM(), L = s.labels;
     $('#desc-image').textContent = `最多 ${limitOf('image')} 張，可拖曳調整順序；在提示詞用「${L.image}1」「${L.image}2」指稱。`
-      + '可拖放、點選，或直接 ⌘V 貼上圖片。沒有參考圖時是文字生圖。';
+      + `可拖放、點選，或直接 ${PASTE_KEY} 貼上圖片。沒有參考圖時是文字生圖。`;
     for (const slot of ['video', 'audio']) $(`section[data-drop="${slot}"]`).hidden = true;
     $('section[data-drop="image"]').hidden = false;
     $('#docCard').hidden = true;
@@ -1470,7 +1472,7 @@ function renderSpec() {
   const s = M(), L = s.labels, note = k => s.notes[k] ? s.notes[k] : '';
   const clip = slot => s.clip[API_TYPE[slot]] || [0, 0], sum = slot => s.clip_sum[API_TYPE[slot]];
   $('#desc-image').textContent = `最多 ${limitOf('image')} 張，可拖曳調整順序；在提示詞用「${L.image}1」「${L.image}2」指稱。`
-    + `可拖放、點選，或直接 ⌘V 貼上圖片。${note('image')}`;
+    + `可拖放、點選，或直接 ${PASTE_KEY} 貼上圖片。${note('image')}`;
   $('#desc-video').textContent = `最多 ${limitOf('video')} 段 MP4／MOV，每段 ${clip('video').join('–')} 秒、合計 ≤ ${sum('video')} 秒、≤ ${s.video.max_mb || 100} MB；`
     + `用「${L.video}1」指稱。${s.video_edit ? '也可以拿來做影片編輯或延長。' : ''}${note('video')}`;
   $('#desc-audio').textContent = `最多 ${limitOf('audio')} 段 WAV／MP3，每段 ${clip('audio').join('–')} 秒、合計 ≤ ${sum('audio')} 秒、≤ 15 MB；`
@@ -2050,7 +2052,7 @@ function buildTask(t) {
   const actions = [];
   const files = taskFiles(t), image = t.kind === 'image';
   if (files.length) {
-    actions.push(h('button', { class: 'btn small', type: 'button', text: state.platform === 'darwin' ? '在 Finder 顯示' : '顯示檔案', onclick: () => reveal(files[0]) }));
+    actions.push(h('button', { class: 'btn small', type: 'button', text: revealLabel(), onclick: () => reveal(files[0]) }));
   }
   if (t.file && !image) {
     actions.push(h('a', { class: 'btn small', href: '/outputs/' + encodeURIComponent(t.file), target: '_blank', rel: 'noopener', text: '開新分頁', style: 'text-decoration:none;color:inherit' }));
@@ -2152,6 +2154,9 @@ async function taskAction(t, action) {
 }
 async function reveal(file) {
   try { await api('/api/reveal', { method: 'POST', json: { file } }); } catch (e) { toast(e.message, 'error'); }
+}
+function revealLabel() {
+  return { darwin: '在 Finder 顯示', win32: '在檔案總管顯示' }[state.platform] || '顯示檔案';
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast('已複製 ' + text); } catch { prompt('複製這個 task_id：', text); }
@@ -2271,7 +2276,7 @@ function renderViewer() {
   $('#viewerTitle').textContent = (files.length > 1 ? `第 ${viewing.index + 1}／${files.length} 張 · ` : '') + file;
   $('#viewerPrev').hidden = $('#viewerNext').hidden = files.length < 2;
   $('#viewerOpen').href = src;
-  $('#viewerReveal').textContent = state.platform === 'darwin' ? '在 Finder 顯示' : '顯示檔案';
+  $('#viewerReveal').textContent = revealLabel();
 }
 function stepViewer(d) {
   const n = taskFiles(viewing.task).length;

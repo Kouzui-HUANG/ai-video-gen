@@ -47,7 +47,7 @@ GMI 把每個圖片模型拆成 `-generate`（文字生圖）與 `-edit`（改�
 - 至少一組 MixRoute 或 GMI Cloud API key
 - 現代瀏覽器
 
-`AI 影片生成.app` 僅供 macOS 使用；直接執行 Python 的方式可用於 macOS、Windows 與 Linux。
+macOS 可以雙擊 `AI 影片生成.app`，Windows 可以雙擊 `AI 影片生成.cmd`；直接執行 Python 的方式可用於 macOS、Windows 與 Linux。
 
 ## 快速開始
 
@@ -58,7 +58,7 @@ git clone https://github.com/Kouzui-HUANG/ai-video-gen.git
 cd ai-video-gen
 ```
 
-請用 `git clone` 下載，之後每次啟動才會自動更新到最新版本（需要安裝 git；macOS 可在終端機執行 `xcode-select --install`）。用 GitHub 的「Download ZIP」下載的也能使用，只是不會自動更新。
+請用 `git clone` 下載，之後每次啟動才會自動更新到最新版本（需要安裝 git：macOS 可在終端機執行 `xcode-select --install`，Windows 請安裝 [Git for Windows](https://git-scm.com/download/win)）。用 GitHub 的「Download ZIP」下載的也能使用，只是不會自動更新。
 
 ### 2. 安裝依賴
 
@@ -76,6 +76,8 @@ Windows PowerShell 啟用虛擬環境的指令為：
 .venv\Scripts\Activate.ps1
 python -m pip install requests
 ```
+
+Windows 用 `AI 影片生成.cmd` 啟動時，缺少 `requests` 會詢問要不要自動安裝，可以略過這一步。
 
 ### 3. 設定 API key
 
@@ -95,6 +97,12 @@ $env:MIXROUTE_API_KEY="你的 MixRoute API key"
 $env:GMI_API_KEY="你的 GMI Cloud API key"
 ```
 
+`$env:` 只對這個 PowerShell 視窗有效。要讓雙擊 `AI 影片生成.cmd` 啟動的伺服器也讀得到，改用 `setx` 永久設定，之後開啟的程式才會生效：
+
+```powershell
+setx GMI_API_KEY "你的 GMI Cloud API key"
+```
+
 ### 4. 啟動網頁介面
 
 ```bash
@@ -112,6 +120,16 @@ python3 video_ui.py --port 9000 --no-browser
 也可以直接雙擊專案根目錄中的 `AI 影片生成.app`。請讓 App 與 `video_ui.py` 保持在同一層；它會在背景啟動伺服器並開啟瀏覽器。
 
 App 啟動的伺服器會在網頁關閉、沒有進行中任務且閒置 10 分鐘後自動結束。啟動記錄位於 `outputs/video_ui.log`。若要改用其他連接埠，可在啟動環境設定 `VIDEO_UI_PORT`。
+
+### Windows 一鍵啟動
+
+雙擊專案根目錄的 `AI 影片生成.cmd`（檔案總管預設隱藏副檔名，會顯示成「AI 影片生成」）。它和 macOS App 一樣：伺服器沒在跑就在背景啟動，準備好後打開瀏覽器。啟動時會出現一個小視窗顯示進度，打開瀏覽器後自動關閉；沒有啟動成功時，視窗會留著顯示原因和記錄的最後幾行。`AI 影片生成.app` 資料夾是 macOS 用的，Windows 上用不到。
+
+- **Python**：優先使用專案裡的 `.venv`，其次是 `python` 指令或 `py` 啟動器找到的 Python 3.9 以上版本。缺少 `requests` 時會詢問要不要用 pip 安裝；完全找不到 Python 時，會說明安裝方式並可直接打開 python.org 的下載頁。
+- **背景執行**：伺服器在背景執行，不會出現視窗，和 App 一樣在網頁關閉、沒有進行中任務且閒置 10 分鐘後自動結束。要馬上結束，可以在工作管理員結束「Python」。
+- **記錄與連接埠**：啟動記錄同樣寫在 `outputs\video_ui.log`；要改用其他連接埠，設定環境變數 `VIDEO_UI_PORT`（例如 `setx VIDEO_UI_PORT 9000`）。
+- 連續雙擊好幾次也只會啟動一個伺服器。
+- 用 ZIP 下載、解壓縮的，第一次雙擊可能出現「無法驗證發行者」的安全性警告，按「執行」即可。
 
 ## 使用方式
 
@@ -207,7 +225,8 @@ outputs/
 ├── tasks.json             # 任務紀錄
 ├── settings.json          # 選項（主題、語言、自動更新）
 ├── inputs/                # 本機素材副本
-└── video_ui.log           # macOS App 的背景啟動記錄
+├── video_ui.log           # macOS App 和 Windows 啟動器的背景啟動記錄
+└── launcher.lock          # Windows 啟動器用來避免重複啟動的空檔案
 ```
 
 `outputs/` 是執行資料，不是程式碼。備份或清理前請先確認是否仍需要任務紀錄、影片及素材副本。
@@ -224,7 +243,10 @@ outputs/
 ├── gmi_video.py       # GMI Cloud API、上傳與狀態轉換
 ├── gmi_image.py       # GMI Cloud 圖片生成（同步請求、找回請求、下載）
 ├── updater.py         # 自動更新：比對 GitHub 上的最新版本，用 git 快轉
-└── AI 影片生成.app/   # macOS 雙擊啟動器
+├── AI 影片生成.app/   # macOS 雙擊啟動器
+├── AI 影片生成.cmd    # Windows 雙擊啟動器：找到 Python 後執行 windows/launcher.py
+└── windows/
+    └── launcher.py    # Windows 啟動器本體：背景啟動伺服器、等它準備好、打開瀏覽器
 ```
 
 若要新增影片模型，先在 `video_models.py` 加入模型規格；圖片模型則加在 `image_models.py`。若 payload 格式不同，再於對應的 API 模組處理轉換。
@@ -238,6 +260,8 @@ outputs/
 ```bash
 python3 -m pip install requests
 ```
+
+Windows 請改用 `py -m pip install requests`。
 
 ### 8765 連接埠已被占用
 
@@ -255,9 +279,17 @@ python3 video_ui.py --port 9000
 
 確認 App 與 `video_ui.py` 位於同一個資料夾，且某個 `python3` 已安裝 `requests`。詳細錯誤可查看 `outputs/video_ui.log`。
 
+### Windows 雙擊 `AI 影片生成.cmd` 沒有啟動
+
+啟動視窗會留著顯示原因和 `outputs\video_ui.log` 的最後幾行。常見的有：
+
+- 找不到 Python：到 [python.org](https://www.python.org/downloads/windows/) 安裝 Python 3.9 以上版本，裝好後再雙擊一次。
+- 連接埠被占用：可能是別的程式用了 8765，設定環境變數 `VIDEO_UI_PORT` 換一個（例如 `setx VIDEO_UI_PORT 9000`，設定後再雙擊一次）。
+- 超過 60 秒還沒準備好：通常是正在下載新版本，等一下再雙擊一次。
+
 ### 右上角沒有「影片／圖片」切換或齒輪
 
-正在執行的是更新前的 `video_ui.py`。請結束它再重新開啟：終端機執行的按 `Ctrl + C`；App 啟動的會在網頁關閉、沒有進行中任務且閒置 10 分鐘後自動結束。
+正在執行的是更新前的 `video_ui.py`。請結束它再重新開啟：終端機執行的按 `Ctrl + C`；App 或 Windows 啟動器啟動的會在網頁關閉、沒有進行中任務且閒置 10 分鐘後自動結束。
 
 ### 沒有自動更新
 

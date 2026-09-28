@@ -54,7 +54,8 @@ def unsupported_reason():
                 f"git clone {REPO_URL}.git 重新下載，再把原本的 outputs/ 資料夾搬過去。")
     git = shutil.which("git")
     if not git:
-        return "找不到 git，無法自動更新。"
+        return "找不到 git，無法自動更新。" + (
+            "請安裝 Git for Windows（https://git-scm.com/download/win），下次啟動就會更新。" if os.name == "nt" else "")
     # macOS 沒裝命令列開發工具時 /usr/bin/git 只是個空殼，一執行就會跳出安裝視窗
     if sys.platform == "darwin" and git == "/usr/bin/git" and subprocess.run(["xcode-select", "-p"],
                                                                             capture_output=True).returncode:
@@ -171,8 +172,10 @@ def run(apply, quick=False):
         problem, missing = _smoke_test()
         if problem:
             _git("reset", "--keep", head["sha"], timeout=30)  # 工作區是乾淨的，退回只會拿掉剛才的更新
-            hint = (f"新版需要還沒安裝的套件 {missing}：請在終端機執行 python3 -m pip install {missing}，下次啟動會再更新。"
-                    if missing else "")
+            # Windows 常裝了好幾個 Python（或用專案的 .venv），直接指定正在執行的這個
+            pip = (f'請在命令提示字元執行 "{sys.executable}" -m pip install {missing}' if os.name == "nt"
+                   else f"請在終端機執行 python3 -m pip install {missing}")
+            hint = f"新版需要還沒安裝的套件 {missing}：{pip}，下次啟動會再更新。" if missing else ""
             return done("rolled_back", f"新版本 {status['latest']['label']}無法啟動，已退回原本的版本。{hint}",
                         detail=problem)
         return done("updated", f"已更新到 {status['latest']['label']}。", previous=head, current=status["latest"],

@@ -4,7 +4,7 @@
 用法（需要 `pip install requests`）：
     python3 video_ui.py                  # 開 http://127.0.0.1:8765 並自動打開瀏覽器
     python3 video_ui.py --port 9000 --no-browser
-    也可以直接雙擊專案資料夾裡的「AI 影片生成」App（背景啟動，閒置後自動結束）。
+    也可以直接雙擊專案資料夾裡的「AI 影片生成」App（macOS）或「AI 影片生成.cmd」（Windows），背景啟動、閒置後自動結束。
 
 - 網頁右上角可切換 API：MixRoute（mixroute_video.py）或 GMI Cloud（gmi_video.py），模型用下拉選單選：兩邊都有
   Wan 3.0（wan3.0-video），GMI 另有 Seedance 2.0（seedance-2-0-260128）、Seedance 2.5（seedance-2-5-260628）
@@ -131,6 +131,7 @@ class TaskStore:
         self.path = path
         self.lock = threading.RLock()
         self.tasks = {}
+        self.closed = False
         if path.exists():
             try:
                 for t in json.loads(path.read_text("utf-8")):
@@ -141,6 +142,8 @@ class TaskStore:
                 print(f"讀不懂 {path.name}（{e}），已改名為 {backup.name}，從空的列表開始")
 
     def _save(self):
+        if self.closed:
+            return
         tasks = sorted(self.tasks.values(), key=lambda t: t["created_at"])
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(tasks, ensure_ascii=False, indent=1), "utf-8")
@@ -156,11 +159,17 @@ class TaskStore:
     def update(self, task_id, **fields):
         with self.lock:
             task = self.tasks.get(task_id)
-            if task is None:  # 已從列表移除
+            if task is None or self.closed:  # 已從列表移除，或已經交給重新啟動的新程序
                 return None
             task.update(fields, updated_at=time.time())
             self._save()
             return dict(task)
+
+    def close(self):
+        """之後不再改紀錄、不再寫檔，查詢中的任務下次更新時就會停下（update 回傳 None）。
+        Windows 重新啟動時舊程序要等新程序結束，執行緒還在跑，不擋的話兩邊會互相覆蓋 tasks.json。"""
+        with self.lock:
+            self.closed = True
 
     def get(self, task_id):
         with self.lock:
@@ -946,6 +955,8 @@ def idle_watchdog(server, idle):
     """網頁開著時每隔幾秒就會來查任務；超過 idle 秒沒人來、也沒有進行中的任務，就結束伺服器。"""
     while True:
         time.sleep(min(30, max(1, idle / 5)))
+        if _restart_status:  # 已經交給重新啟動的新程序（Windows 上這個程序還在等它結束）
+            return
         with _pollers_lock:
             busy = any(t.is_alive() for t in _pollers.values())
         if not busy and time.monotonic() - _last_request > idle:
@@ -1021,7 +1032,10 @@ def restart(status, no_browser=False):
     print("重新啟動以載入新版本…", flush=True)
     sys.stderr.flush()
     if os.name == "nt":  # Windows 的 os.execv 會另開一個程序、原本的終端機接不回來，改成等新的程序結束
-        sys.exit(subprocess.call(argv))
+        if store:  # 等的時候這個程序的查詢執行緒還在跑：交棒後就不再寫 tasks.json
+            store.close()
+        # 輸出要明確交給新的程序：不指定時 Windows 不讓它繼承檔案 handle，背景執行（輸出導到記錄檔）時記錄會斷掉
+        sys.exit(subprocess.call(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr))
     os.execv(sys.executable, argv)
 
 
@@ -1074,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({
                     "keys": {name: k["source"] for name, k in _keys.items()},
                     "prices": _prices,
-                    "model": mixroute_video.MODEL,  # launch.sh 用這個欄位判斷伺服器是否已經在跑
+                    "model": mixroute_video.MODEL,  # 啟動器（launch.sh、windows/launcher.py）用這個欄位判斷伺服器是否已經在跑
                     "platform": sys.platform,
                     "outputs_dir": str(OUTPUTS),
                     "settings": _settings,
@@ -1284,6 +1298,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global store, _update, _version
+    if os.name == "nt":  # 輸出導到記錄檔時（Windows 啟動器），Windows 用系統編碼寫檔（英文版是 cp1252），一印中文就當掉
+        for stream in (sys.stdout, sys.stderr):
+            if stream and not stream.isatty():
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     labels = dict.fromkeys(m["label"] for m in video_models.MODELS + image_models.MODELS)
     p = argparse.ArgumentParser(description=f"影片和圖片生成網頁介面（{'、'.join(labels)}）")
     p.add_argument("--port", type=int, default=8765, help="本機埠號（預設 8765）")
@@ -1295,13 +1313,17 @@ def main():
     OUTPUTS.mkdir(exist_ok=True)
     _settings.update(load_settings())
     # 先佔住埠（確定沒有另一個 video_ui.py 在跑，才不會改到它正在用的檔案）再檢查更新；
-    # 檢查完才開始接受連線，launch.sh 等到連得上才開網頁，所以打開的一定是新版
+    # 檢查完才開始接受連線，啟動器（launch.sh、windows/launcher.py）等到連得上才開網頁，所以打開的一定是新版
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler, bind_and_activate=False)
+    # HTTPServer 預設開 SO_REUSEADDR，在 Windows 上它讓第二個 video_ui.py 也綁得上同一個埠，上面的保護就沒用了。
+    # Windows 本來就能綁定還有 TIME_WAIT 連線的埠，不開也不影響重新啟動（socket.create_server 也是這樣處理）
+    server.allow_reuse_address = os.name != "nt"
     try:
         server.server_bind()
     except OSError as e:
         server.server_close()
-        sys.exit(f"無法使用埠 {args.port}（{e.strerror}）：可能已經開著一個 video_ui.py，或用 --port 換一個")
+        sys.exit(f"無法使用埠 {args.port}（{e.strerror}）：可能已經開著一個 video_ui.py，"
+                 "或用 --port 換一個（App 和 Windows 啟動器看環境變數 VIDEO_UI_PORT）")
     server.allowed_hosts = {f"127.0.0.1:{args.port}", f"localhost:{args.port}"}
     server.allowed_origins = {f"http://{h}" for h in server.allowed_hosts}
     just_updated = os.environ.pop(UPDATED_ENV, None)
