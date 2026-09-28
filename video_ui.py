@@ -10,9 +10,9 @@
   Wan 3.0（wan3.0-video），GMI 另有 Seedance 2.0（seedance-2-0-260128）、Seedance 2.5（seedance-2-5-260628）
   和 MiniMax H3（MiniMax-H3）。
   各模型的參數與素材限制在 video_models.py，網頁依它調整左邊的表單；切換時素材、提示詞和共用的參數都會保留。
-- 右上角切到「圖片」可以用 GMI 的 GPT Image 2.5（Sunburst、Flare）和 GPT Image 2（gmi_image.py）生成圖片：
-  沒有參考圖時送 -generate（文字生圖），有參考圖時送 -edit（改圖、合成）。參數與價格在 image_models.py；
-  提示詞和參考圖和影片共用。
+- 右上角切到「圖片」可以用 GMI 的 GPT Image 2.5（Sunburst、Flare）、GPT Image 2 和 Gemini 3 Pro Image（gmi_image.py）
+  生成圖片：GPT Image 沒有參考圖時送 -generate（文字生圖），有參考圖時送 -edit（改圖、合成）；Gemini 只有一個模型 ID，
+  有參考圖就一起送。參數與價格在 image_models.py；提示詞和參考圖和影片共用。
   這些模型是同步的：送出後要等圖片生成完 GMI 才回應，所以伺服器先建一筆任務，在背景等結果再下載。
 - API key：優先用環境變數 MIXROUTE_API_KEY／GMI_API_KEY，沒有的話在網頁上輸入（只放在伺服器記憶體）。
 - MixRoute：本機圖片在瀏覽器處理後以 base64 直接送出，不經第三方；本機影片、音訊、文件會上傳到
@@ -277,8 +277,9 @@ def check_gmi_key(key):
     models = [m for m in video_models.MODELS if m["provider"] == "gmi"]
     # 「API/模型」→ (查哪個模型的說明, 怎麼讀價格)；圖片模型的 generate 和 edit 價格相同，查 generate 就好
     lookups = {f"gmi/{m['id']}": (m["id"], gmi_video.parse_prices) for m in models}
-    lookups.update({f"gmi/{m['id']}": (m["generate"], gmi_image.parse_size_prices if m["price_rule"] == "sizes"
-                                       else gmi_image.parse_prices) for m in image_models.MODELS})
+    image_parsers = {"sizes": gmi_image.parse_size_prices, "tiers": gmi_image.parse_tier_prices}
+    lookups.update({f"gmi/{m['id']}": (m["generate"], image_parsers.get(m["price_rule"], gmi_image.parse_prices))
+                    for m in image_models.MODELS})
 
     def update_price(item):
         price_key, (model_id, parse) = item
@@ -590,8 +591,9 @@ def create_task(body):
     return record
 
 
-# ---------- 圖片（GPT Image 2.5） ----------
-IMAGE_PARAM_KEYS = ("size", "quality", "n", "output_format", "output_compression", "background", "moderation")
+# ---------- 圖片（GPT Image、Gemini） ----------
+IMAGE_PARAM_KEYS = ("size", "quality", "n", "output_format", "output_compression", "background", "moderation",
+                    "aspect_ratio", "image_size", "image_output_format")
 
 
 def image_spec_of(model):
@@ -626,30 +628,38 @@ def clean_image_parameters(p, spec, endpoint):
     """依圖片模型的設定檢查網頁送來的參數，回傳要放進 payload 的參數。endpoint 是 generate 或 edit：
     模型的這個端點不收的參數（extra_params 沒列的）直接不送，網頁上已經說明這次用什麼。"""
     label, extra = spec["label"], spec["extra_params"][endpoint]
-    m = re.fullmatch(r"(\d{1,5})x(\d{1,5})", str(p.get("size") or ""))
-    if not m:
-        raise ValueError("輸出尺寸的格式要像 1024x1024")
-    w, h = int(m.group(1)), int(m.group(2))
-    problem = size_problem(w, h, spec["size"])
-    if problem:
-        raise ValueError(f"{label} 的輸出尺寸 {w}×{h} 不行：{problem}")
-    quality = p.get("quality")
-    if quality not in spec["qualities"]:  # 不收 auto：GMI 會按 max 計價
-        raise ValueError(f"{label} 的品質只能是 {'、'.join(spec['qualities'])}")
-    try:
-        n = int(p.get("n", 1))
-    except (TypeError, ValueError):
-        raise ValueError("張數必須是整數") from None
-    rule = spec["n"]
-    if not rule["min"] <= n <= rule["max"]:
-        raise ValueError(f"{label} 一次可以生成 {rule['min']}-{rule['max']} 張")
-    out = {"size": f"{w}x{h}", "quality": quality, "n": n}
+    if spec["sizing"] == "ratio":  # Gemini：只送比例和解析度，沒有品質和張數
+        if p.get("aspect_ratio") not in spec["ratios"]:
+            raise ValueError(f"{label} 的比例只能是 {'、'.join(spec['ratios'])}")
+        if p.get("image_size") not in spec["tiers"]:
+            raise ValueError(f"{label} 的解析度只能是 {'、'.join(spec['tiers'])}")
+        out = {"aspect_ratio": p["aspect_ratio"], "image_size": p["image_size"]}
+    else:
+        m = re.fullmatch(r"(\d{1,5})x(\d{1,5})", str(p.get("size") or ""))
+        if not m:
+            raise ValueError("輸出尺寸的格式要像 1024x1024")
+        w, h = int(m.group(1)), int(m.group(2))
+        problem = size_problem(w, h, spec["size"])
+        if problem:
+            raise ValueError(f"{label} 的輸出尺寸 {w}×{h} 不行：{problem}")
+        quality = p.get("quality")
+        if quality not in spec["qualities"]:  # 不收 auto：GMI 會按 max 計價
+            raise ValueError(f"{label} 的品質只能是 {'、'.join(spec['qualities'])}")
+        try:
+            n = int(p.get("n", 1))
+        except (TypeError, ValueError):
+            raise ValueError("張數必須是整數") from None
+        rule = spec["n"]
+        if not rule["min"] <= n <= rule["max"]:
+            raise ValueError(f"{label} 一次可以生成 {rule['min']}-{rule['max']} 張")
+        out = {"size": f"{w}x{h}", "quality": quality, "n": n}
     fmt = "png"  # 不收 output_format 的端點輸出 PNG
     if "output_format" in extra:
-        fmt = p.get("output_format") or spec["defaults"]["output_format"]
+        name = spec["format_param"]  # Gemini 叫 image_output_format
+        fmt = p.get(name) or spec["defaults"]["output_format"]
         if fmt not in spec["formats"]:
             raise ValueError(f"{label} 的輸出格式只能是 {'、'.join(spec['formats'])}")
-        out["output_format"] = fmt
+        out[name] = fmt
     if "background" in extra:
         background = p.get("background") or "auto"
         if background not in spec["backgrounds"]:
@@ -757,6 +767,11 @@ def _run_image(task_id):
             if record.get("imported") and isinstance(payload, dict):
                 fields["prompt"] = str(payload.get("prompt") or "")
                 fields["parameters"] = {k: payload[k] for k in IMAGE_PARAM_KEYS if k in payload}
+                # 參考圖：任務列表靠它顯示縮圖、分辨改圖還是文字生圖（Gemini 兩種都是同一個模型 ID）
+                refs = payload.get("image") or []
+                refs = [refs] if isinstance(refs, str) else refs
+                fields["media"] = [{"type": "reference_image", "url": u, "name": urlparse(u).path.rsplit("/", 1)[-1] or u}
+                                   for u in refs if isinstance(u, str) and urlparse(u).scheme in ("http", "https")]
             record = store.update(task_id, **fields)
             if record is None:
                 return
@@ -768,9 +783,10 @@ def _run_image(task_id):
         fields = {"status": "FAILED", "finished_at": time.time()}
         if e.request_id:
             fields["request_id"] = e.request_id
-        store.update(task_id, polling=False, error=explain_image_failure(str(e)), **fields)
+        store.update(task_id, polling=False, error=explain_image_failure(str(e), task_spec(task_id)), **fields)
     except (RuntimeError, TimeoutError, requests.RequestException, OSError, ValueError) as e:
-        store.update(task_id, polling=False, downloading=False, error=explain_image_failure(friendly_error(e)))
+        store.update(task_id, polling=False, downloading=False,
+                     error=explain_image_failure(friendly_error(e), task_spec(task_id)))
 
 
 def _image_result(session, task_id, record, on_update):
@@ -818,7 +834,8 @@ def download_images(task_id, record):
     """把生成的圖片存到 outputs/，檔名用 GMI 的 request_id（一次多張時加 -1、-2…）；已經下載過的不重下。"""
     urls = record.get("result_urls") or []
     base = safe_name(record.get("request_id") or task_id)
-    fmt = (record.get("parameters") or {}).get("output_format")
+    params = record.get("parameters") or {}
+    fmt = params.get("output_format") or params.get("image_output_format")
     store.update(task_id, downloading=True)
     files = []
     for i, url in enumerate(urls, 1):
@@ -832,14 +849,25 @@ def download_images(task_id, record):
     return files
 
 
-def explain_image_failure(text):
-    """圖片任務常見的失敗原因加上中文說明。GPT Image 2 會說明原因，2.5 一律回 Generation rejected。"""
+def task_spec(task_id):
+    """圖片任務用的是 image_models.py 的哪個模型（找不到時是 None）。"""
+    record = store.get(task_id) or {}
+    return IMAGE_SPECS.get(record.get("family")) or image_family(record.get("model"))
+
+
+def explain_image_failure(text, spec=None):
+    """圖片任務常見的失敗原因加上中文說明。GPT Image 2 會說明原因，2.5 一律回 Generation rejected；
+    Gemini 被 Google 擋下時，訊息裡有 Vertex AI 的 finishReason／blockReason（IMAGE_SAFETY、PROHIBITED_CONTENT…）。"""
     if "failed to fetch image" in text:
         return f"模型供應商下載不到參考圖：網址打不開、要登入才能看，或已經過期。\n原始訊息：{text}"
     if re.search(r"safety system|moderation_blocked|content policy", text, re.I):
         return f"提示詞或參考圖沒通過 OpenAI 的內容審核，請改寫後再試。\n原始訊息：{text}"
+    if re.search(r"IMAGE_SAFETY|PROHIBITED_CONTENT|BLOCKLIST|SPII|RECITATION|blockReason|finishReason\W+SAFETY", text):
+        return ("提示詞或參考圖沒通過 Google 的安全審核（例如真人肖像、名人、暴力或受版權保護的內容），"
+                f"請改寫提示詞或換參考圖再試。\n原始訊息：{text}")
     if re.search(r"Generation rejected|INVALID_INPUT", text):
-        return ("GMI 拒絕了這個請求。常見原因：提示詞或參考圖沒通過內容審核（可以改寫提示詞，或勾選「寬鬆審核」再試）、"
+        tip = "可以改寫提示詞，或勾選「寬鬆審核」再試" if spec and spec["moderation"] else "可以改寫提示詞再試"
+        return (f"GMI 拒絕了這個請求。常見原因：提示詞或參考圖沒通過內容審核（{tip}）、"
                 f"參考圖網址打不開，或參數組合不被接受。\n原始訊息：{text}")
     return text
 

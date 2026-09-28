@@ -587,11 +587,11 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
           </div>
         </div>
         <div class="param-note" id="imgSizeNote"></div>
-        <span class="label">品質</span>
+        <span class="label" id="imgQualityLabel">品質</span>
         <div class="seg" id="imgQualitySeg"></div>
         <div class="param-note" id="imgQualityNote"></div>
-        <span class="label">張數</span>
-        <div class="dur">
+        <span class="label" id="imgNLabel">張數</span>
+        <div class="dur" id="imgNBox">
           <input type="range" id="imgNRange" min="1" max="10" step="1" aria-label="一次生成幾張">
           <span><input type="number" id="imgNNum" min="1" max="10" step="1" aria-label="張數"> 張</span>
         </div>
@@ -795,14 +795,15 @@ const CATALOG = (() => {
     return Array.isArray(list) && list.length ? list : null;
   } catch { return null; }
 })();
-// 圖片模式（GMI 的 GPT Image 2.5）：video_ui.py 把 image_models.py 的 MODELS 填進 #imageCatalog；舊版伺服器沒有，就不顯示「圖片」
+// 圖片模式（GMI 的 GPT Image、Gemini）：video_ui.py 把 image_models.py 的 MODELS 填進 #imageCatalog；舊版伺服器沒有，就不顯示「圖片」
 const IMAGE_CATALOG = (() => {
   try {
     const list = JSON.parse(document.getElementById('imageCatalog').textContent);
     return Array.isArray(list) && list.length ? list : null;
   } catch { return null; }
 })();
-// 圖片的參數和影片的分開記：ratio 是比例（ref＝跟 Image 1 一樣、custom＝自訂寬高），tier 是 image_models.py 的解析度
+// 圖片的參數和影片的分開記：ratio 是比例（ref＝跟 Image 1 一樣、custom＝自訂寬高），tier 是 image_models.py 的解析度。
+// 各模型共用：模型沒有的選項（例如 Gemini 沒有品質、不能自訂寬高）照樣記著，只在送出時換成這個模型能用的值
 const DEFAULT_IMAGE_PARAMS = { ratio: '1:1', tier: '1K', width: 1024, height: 1024, quality: 'medium', n: 1, format: 'png', compression: 100, background: 'auto', moderation: 'auto' };
 const QUALITY_LABEL = { low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' };
 const FORMAT_LABEL = { png: 'PNG', jpeg: 'JPEG', webp: 'WebP' };
@@ -1653,11 +1654,48 @@ function sizeProblem(w, h, rule) {
 // 比例＋解析度的輸出尺寸：模型有指定（tier_sizes）就用指定的，不然照 fitSize 算
 function tierSize(s, ratio, tier) {
   const fixed = s.tier_sizes?.[tier]?.[ratio];
-  return fixed ? fixed.split('x').map(Number) : fitSize(ratioValue(ratio), s.tiers[tier] || Object.values(s.tiers)[0], s.size);
+  if (fixed) return fixed.split('x').map(Number);
+  return s.size ? fitSize(ratioValue(ratio), s.tiers[tier] || Object.values(s.tiers)[0], s.size) : [0, 0];
 }
-// 這次的輸出尺寸 { w, h, notes }
+// 只能選比例和解析度、不能指定寬高的模型（Gemini：sizing 是 ratio）。舊版伺服器的模型清單沒有 sizing，都是指定寬高的 GPT Image
+const ratioSizing = s => s.sizing === 'ratio';
+// 模型的比例選項裡最接近 r（寬／高）的：用倍數比較，所以 2:3 會對到 3:4 而不是 9:16
+const nearestRatio = (s, r) => s.ratios.reduce((a, b) => Math.abs(Math.log(ratioValue(b) / r)) < Math.abs(Math.log(ratioValue(a) / r)) ? b : a);
+// sizing 是 ratio 的模型這次用哪個比例和解析度 { ratio, tier, notes }。選的比例這個模型沒有
+// （自訂寬高、同參考圖、只有 GPT Image 有的 2:3）時換成最接近的，並說明；自訂寬高另外挑像素數最接近的解析度
+function ratioTier(s) {
+  const p = state.imageParams, notes = [], tiers = Object.keys(s.tiers);
+  let ratio = p.ratio, tier = tiers.includes(p.tier) ? p.tier : tiers[0];
+  if (ratio === 'ref') {
+    const r = refRatio();
+    ratio = r == null ? s.ratios[0] : nearestRatio(s, r);
+    if (r == null) notes.push(`還沒有參考圖，比例先用 ${ratio}`);
+    else if (Math.abs(ratioValue(ratio) / r - 1) > 0.01) notes.push(`${s.label} 只能選固定的比例，這次用最接近 Image 1 的 ${ratio}`);
+  } else if (ratio === 'custom') {
+    const w = Math.round(Number(p.width)) || 0, h = Math.round(Number(p.height)) || 0;
+    if (w > 0 && h > 0) {
+      ratio = nearestRatio(s, w / h);
+      const off = t => { const [W, H] = tierSize(s, ratio, t); return Math.abs(Math.log(W * H / (w * h))); };
+      tier = tiers.reduce((a, b) => off(b) < off(a) ? b : a);
+      notes.push(`${s.label} 不能自訂寬高，這次用最接近 ${w}×${h} 的 ${ratio}、${tier}`);
+    } else {
+      ratio = s.ratios[0];
+      notes.push(`${s.label} 不能自訂寬高，這次用 ${ratio}`);
+    }
+  } else if (!s.ratios.includes(ratio)) {
+    ratio = nearestRatio(s, ratioValue(p.ratio));
+    notes.push(`${s.label} 沒有 ${p.ratio} 比例，這次用最接近的 ${ratio}`);
+  }
+  if (!tiers.includes(p.tier) && p.ratio !== 'custom') notes.push(`${s.label} 沒有 ${p.tier}，這次用 ${tier}`);
+  return { ratio, tier, notes };
+}
+// 這次的輸出尺寸 { w, h, notes }；sizing 是 ratio 的模型另外有 ratio、tier
 function imageSize(s = IM()) {
   const p = state.imageParams, rule = s.size, notes = [];
+  if (ratioSizing(s)) {
+    const t = ratioTier(s), [w, h] = tierSize(s, t.ratio, t.tier);
+    return { w, h, ...t };
+  }
   if (p.ratio === 'custom') return { w: Math.round(Number(p.width)) || 0, h: Math.round(Number(p.height)) || 0, notes };
   if (p.ratio !== 'ref') { const [w, h] = tierSize(s, p.ratio, p.tier); return { w, h, notes }; }
   let r = refRatio();
@@ -1675,23 +1713,29 @@ const imageEndpoint = () => itemsOf('image').length ? 'edit' : 'generate';
 // 這個端點收哪些選用參數。還沒重開的舊伺服器送來的模型清單沒有 extra_params（那時只有 2.5，全部都收）
 const extraParams = (s, endpoint) => s.extra_params?.[endpoint] ?? ['output_format', 'output_compression', 'background', 'moderation'];
 // 這次實際會送出的圖片參數：只放這個模型、這個端點收的參數（extra_params）。和影片一樣不改掉使用者選的值，
-// 例如選了透明背景又改成 JPEG、或換到沒有「最高」品質的模型，只在送出時換成可用的值，並在 notes 說明
+// 例如選了透明背景又改成 JPEG、或換到沒有「最高」品質的模型，只在送出時換成可用的值，並在 notes 說明。
+// 尺寸：指定寬高的模型送 size；Gemini 送 aspect_ratio 和 image_size。沒有品質（qualities 空的）、張數（n 是 null）的模型不送
 function effectiveImageParams(s = IM()) {
-  const p = state.imageParams, d = s.defaults, { w, h, notes } = imageSize(s);
+  const p = state.imageParams, d = s.defaults, size = imageSize(s), { w, h, notes } = size;
   const endpoint = imageEndpoint(), extra = extraParams(s, endpoint);
   const int = (v, lo, hi, fallback) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback; };
-  let quality = p.quality;
-  if (!s.qualities.includes(quality)) {  // 用這個模型有的、不超過原本選的最高品質
-    const want = QUALITY_ORDER.indexOf(quality);
-    quality = want < 0 ? d.quality : [...s.qualities].reverse().find(q => QUALITY_ORDER.indexOf(q) <= want) || s.qualities[0];
-    if (want >= 0) notes.push(`${s.label} 沒有「${QUALITY_LABEL[p.quality]}」品質，這次用「${QUALITY_LABEL[quality]}」`);
+  const params = ratioSizing(s) ? { aspect_ratio: size.ratio, image_size: size.tier } : { size: `${w}x${h}` };
+  if (s.qualities.length) {
+    let quality = p.quality;
+    if (!s.qualities.includes(quality)) {  // 用這個模型有的、不超過原本選的最高品質
+      const want = QUALITY_ORDER.indexOf(quality);
+      quality = want < 0 ? d.quality : [...s.qualities].reverse().find(q => QUALITY_ORDER.indexOf(q) <= want) || s.qualities[0];
+      if (want >= 0) notes.push(`${s.label} 沒有「${QUALITY_LABEL[p.quality]}」品質，這次用「${QUALITY_LABEL[quality]}」`);
+    }
+    params.quality = quality;
   }
-  const params = { size: `${w}x${h}`, quality, n: int(p.n, s.n.min, s.n.max, d.n) };
+  if (s.n) params.n = int(p.n, s.n.min, s.n.max, d.n);
+  else if (Number(p.n) > 1) notes.push(`${s.label} 一次只能生成 1 張，這次生成 1 張`);
   let format = 'png';  // 不收 output_format 的端點輸出 PNG
   if (extra.includes('output_format')) {
     format = s.formats.includes(p.format) ? p.format : d.output_format;
     if (format !== p.format) notes.push(`${s.label} 不能輸出 ${FORMAT_LABEL[p.format] || p.format}，這次用 ${FORMAT_LABEL[format]}`);
-    params.output_format = format;
+    params[s.format_param || 'output_format'] = format;  // Gemini 叫 image_output_format
   } else if (p.format !== 'png') {
     notes.push(`${s.label} ${endpoint === 'edit' ? '改圖' : '文字生圖'}只能輸出 PNG`);
   }
@@ -1712,20 +1756,24 @@ function effectiveImageParams(s = IM()) {
   }
   return { params, notes, w, h, format, endpoint };
 }
-// 每張的價格（美元）。pixels：1024×1024 的價格按像素數換算；sizes：只有列出來的尺寸有價格，其他是 null
-function imagePrice(s, quality, w, h) {
+// 每張的價格（美元），p 是送出的參數。pixels：1024×1024 的價格按像素數換算；sizes：只有列出來的尺寸有價格，其他是 null；
+// tiers：看解析度（image_size）
+function imagePrice(s, p) {
   const prices = state.prices[specKey(s)] || s.prices;
-  if (s.price_rule === 'sizes') return prices[`${Math.min(w, h)}x${Math.max(w, h)}`]?.[quality] ?? null;
-  const unit = prices[quality];
+  if (s.price_rule === 'tiers') return prices[p.image_size] ?? null;
+  const [w, h] = String(p.size).split('x').map(Number);
+  if (!(w > 0 && h > 0)) return null;
+  if (s.price_rule === 'sizes') return prices[`${Math.min(w, h)}x${Math.max(w, h)}`]?.[p.quality] ?? null;
+  const unit = prices[p.quality];
   return unit == null ? null : unit * w * h / (1024 * 1024);
 }
 // 預估費用：每張的價格 × 張數，加上參考圖和提示詞（按 token 計價的模型才有）。沒有公開價格時是 null
 function imageCost(s, e) {
-  const per = imagePrice(s, e.params.quality, e.w, e.h);
+  const per = imagePrice(s, e.params);
   if (per == null) return null;
   const refs = e.endpoint === 'edit' ? Math.min(itemsOf('image').length, limitOf('image', s)) : 0;
   const text = s.token_prices ? new TextEncoder().encode(state.prompt.trim()).length / 3 * s.token_prices.text / 1e6 : 0;
-  return { per, refs, total: per * e.params.n + refs * s.ref_price + text };
+  return { per, refs, total: per * (e.params.n || 1) + refs * s.ref_price + text };
 }
 // 按尺寸計價的模型：這個品質有公開價格的尺寸，例如「1024×1024 $0.06、1024×1536／1536×1024 $0.12」
 function knownPrices(s, quality) {
@@ -1734,20 +1782,24 @@ function knownPrices(s, quality) {
     return `${a}×${b}${a !== b ? `／${b}×${a}` : ''} ${fmtUsd(q[quality])}`;
   }).join('、');
 }
-// 生成完 GMI 回報的實際用量（outcome.request_usage）；按 token 計價的模型換算成費用，按尺寸計價的用每張的價格
+// 生成完的用量和費用：GMI 回報的實際用量（outcome.request_usage，GPT Image 才有）；按 token 計價的模型用它換算費用，
+// 其他的用每張的價格 × 生成的張數，加上參考圖。沒有可以顯示的就是空字串
 function imageUsageText(t) {
   const u = t.usage, s = imageSpecOf(t), p = t.parameters || {};
-  if (!u || !s) return '';
+  if (!s) return '';
   let cost = null;
   if (s.token_prices) {
+    if (!u) return '';
     const inp = u.input_tokens_details || {}, out = u.output_tokens_details || {}, tp = s.token_prices;
     cost = ((inp.text_tokens || 0) * tp.text + (inp.image_tokens || 0) * tp.image + (out.image_tokens ?? u.output_tokens ?? 0) * tp.output) / 1e6;
-  } else if (p.size) {
-    const [w, h] = p.size.split('x').map(Number), per = imagePrice(s, p.quality, w, h);
-    if (per != null) cost = per * (p.n || 1);
+  } else if (String(t.status).toUpperCase() === 'SUCCESS') {  // 失敗的請求 GMI 不收費
+    const per = imagePrice(s, p), refs = (t.media || []).filter(m => m.type === 'reference_image').length;
+    if (per != null) cost = per * (taskFiles(t).length || p.n || 1) + refs * (s.ref_price || 0);
   }
-  return `用量：輸入 ${(u.input_tokens || 0).toLocaleString()}、輸出 ${(u.output_tokens || 0).toLocaleString()} tokens`
-    + (cost != null ? `，約 ${fmtUsd(cost)}` : '');
+  const tokens = u && (u.input_tokens != null || u.output_tokens != null)
+    ? `用量：輸入 ${(u.input_tokens || 0).toLocaleString()}、輸出 ${(u.output_tokens || 0).toLocaleString()} tokens` : '';
+  if (cost == null) return tokens;
+  return tokens ? `${tokens}，約 ${fmtUsd(cost)}` : `費用約 ${fmtUsd(cost)}（GMI 公布的價格）`;
 }
 function setImageParams(fields) {
   Object.assign(state.imageParams, fields);
@@ -1758,28 +1810,42 @@ function setImageParams(fields) {
 function renderImageParams() {
   const s = IM();
   if (!s) return;
-  const p = state.imageParams, e = effectiveImageParams(s), hasRef = itemsOf('image').length > 0;
-  $('#imgRatioSeg').replaceChildren(...[...s.ratios, 'ref', 'custom'].map(v => {
-    const b = segButton(v === 'ref' ? '同參考圖' : v === 'custom' ? '自訂' : v, p.ratio === v, () => setImageParams({ ratio: v }),
+  const p = state.imageParams, e = effectiveImageParams(s), hasRef = itemsOf('image').length > 0, fixed = ratioSizing(s);
+  // 指定寬高的模型：記著的比例不在選項裡（在 Gemini 選了 4:5）也照算，多顯示一個按鈕。
+  // Gemini 沒有「自訂」；記著的比例它沒有時，按下的是這次實際用的比例（見 ratioTier）
+  const extraRatio = !fixed && /^\d+:\d+$/.test(p.ratio) && !s.ratios.includes(p.ratio) ? [p.ratio] : [];
+  const ratios = fixed ? [...s.ratios, 'ref'] : [...s.ratios, ...extraRatio, 'ref', 'custom'];
+  $('#imgRatioSeg').replaceChildren(...ratios.map(v => {
+    const on = fixed && p.ratio !== 'ref' ? e.params.aspect_ratio === v : p.ratio === v;
+    const b = segButton(v === 'ref' ? '同參考圖' : v === 'custom' ? '自訂' : v, on, () => setImageParams({ ratio: v }),
       v.includes(':') ? ratioIcon(v) : null);
-    if (v === 'ref') { b.disabled = !hasRef && p.ratio !== 'ref'; b.title = '輸出的長寬比跟 Image 1 一樣（改圖時常用）'; }
+    if (v === 'ref') {
+      b.disabled = !hasRef && p.ratio !== 'ref';
+      b.title = fixed ? '用最接近 Image 1 長寬比的比例（改圖時常用）' : '輸出的長寬比跟 Image 1 一樣（改圖時常用）';
+    }
     return b;
   }));
-  const custom = p.ratio === 'custom';
+  const custom = !fixed && p.ratio === 'custom';
   $('#imgTierSeg').hidden = custom;
   $('#imgCustom').hidden = !custom;
-  $('#imgTierSeg').replaceChildren(...Object.keys(s.tiers).map(t => segButton(t, p.tier === t, () => setImageParams({ tier: t }))));
+  const tierOn = fixed ? e.params.image_size : p.tier;
+  $('#imgTierSeg').replaceChildren(...Object.keys(s.tiers).map(t => segButton(t, tierOn === t, () => setImageParams({ tier: t }))));
   for (const [id, v] of [['#imgW', p.width], ['#imgH', p.height]]) if (document.activeElement !== $(id)) $(id).value = v;
-  const problem = sizeProblem(e.w, e.h, s.size), note = $('#imgSizeNote');
-  note.textContent = `輸出 ${e.w}×${e.h}（${(e.w * e.h / 1e6).toFixed(1)} MP）` + (problem ? `：${problem}` : '');
+  const problem = fixed ? '' : sizeProblem(e.w, e.h, s.size), note = $('#imgSizeNote'), cost = imageCost(s, e);
+  note.textContent = `輸出 ${e.w}×${e.h}（${(e.w * e.h / 1e6).toFixed(1)} MP）` + (problem ? `：${problem}` : '')
+    + (fixed ? (cost ? `，每張 ${fmtUsd(cost.per)}` : '') + '。尺寸由模型依比例和解析度決定' : '');
   note.style.color = problem ? 'var(--err)' : '';
+  // 沒有品質（Gemini）、一次只能一張的模型：整列藏起來，記著的值留給其他模型
+  $('#imgQualityLabel').hidden = $('#imgQualitySeg').hidden = $('#imgQualityNote').hidden = !s.qualities.length;
   $('#imgQualitySeg').replaceChildren(...s.qualities.map(q => segButton(QUALITY_LABEL[q] || q, e.params.quality === q, () => setImageParams({ quality: q }))));
-  const cost = imageCost(s, e);
   $('#imgQualityNote').textContent = e.params.quality + (problem ? '' : cost ? `：這個尺寸約 ${fmtUsd(cost.per)}／張` : '：GMI 沒有公開這個尺寸的價格')
     + '。越高越精細，但越慢、越貴';
-  for (const el of [$('#imgNRange'), $('#imgNNum')]) { el.min = s.n.min; el.max = s.n.max; }
-  $('#imgNRange').value = e.params.n;
-  if (document.activeElement !== $('#imgNNum')) $('#imgNNum').value = e.params.n;
+  $('#imgNLabel').hidden = $('#imgNBox').hidden = !s.n;
+  if (s.n) {
+    for (const el of [$('#imgNRange'), $('#imgNNum')]) { el.min = s.n.min; el.max = s.n.max; }
+    $('#imgNRange').value = e.params.n;
+    if (document.activeElement !== $('#imgNNum')) $('#imgNNum').value = e.params.n;
+  }
   // 這個端點不收 output_format（GPT Image 2 改圖）：只能 PNG，其他格式停用
   const extra = extraParams(s, e.endpoint);
   $('#imgFormatSeg').replaceChildren(...s.formats.map(f => {
@@ -1892,7 +1958,8 @@ function collectImageIssues() {
   const limit = limitOf('image');
   if (items.length > limit) add('error', `${s.label} 的參考圖最多 ${limit} 張，目前有 ${items.length} 張，請移除 ${items.length - limit} 張`);
   if (!prompt) add('info', `${s.label} 一定要有提示詞`, true);
-  const problem = sizeProblem(e.w, e.h, s.size);
+  if (s.prompt_max && prompt.length > s.prompt_max) add('warn', `提示詞 ${prompt.length.toLocaleString()} 字，超過 ${s.label} 建議的 ${s.prompt_max.toLocaleString()} 字`);
+  const problem = ratioSizing(s) ? '' : sizeProblem(e.w, e.h, s.size);
   if (problem) add('error', `輸出尺寸 ${e.w}×${e.h} 不行：${problem}`);
   for (const text of e.notes) add('info', text);
   add('info', items.length
@@ -1911,12 +1978,15 @@ function collectImageIssues() {
   if (problem) {
     // 尺寸不合規則，不估價
   } else if (cost) {
-    add('info', `${P().label} 預估費用：${e.w}×${e.h}、品質 ${e.params.quality} 約 ${fmtUsd(cost.per)}／張 × ${e.params.n} 張`
+    const what = ratioSizing(s) ? `${e.params.aspect_ratio}、${e.params.image_size}（${e.w}×${e.h}）` : `${e.w}×${e.h}、品質 ${e.params.quality} `;
+    add('info', `${P().label} 預估費用：${what}約 ${fmtUsd(cost.per)}／張 × ${e.params.n || 1} 張`
       + (cost.refs && s.ref_price ? ` ＋ 參考圖 ${cost.refs} 張` : '') + ` ≈ ${fmtUsd(cost.total)}`
-      + (s.price_rule === 'sizes' ? '（GMI 公布的每張價格）' : '（建立請求時預扣，預扣的就是實際費用）'));
-  } else {
+      + (['sizes', 'tiers'].includes(s.price_rule) ? '（GMI 公布的每張價格）' : '（建立請求時預扣，預扣的就是實際費用）'));
+  } else if (s.price_rule === 'sizes') {
     add('warn', `GMI 沒有公開 ${s.label} ${e.w}×${e.h} 的價格，實際費用請到 GMI 後台確認`
       + `（品質 ${e.params.quality} 有公開的：${knownPrices(s, e.params.quality)}）`);
+  } else {
+    add('warn', `GMI 沒有公開 ${s.label} 這個設定的價格，實際費用請到 GMI 後台確認`);
   }
   return out;
 }
@@ -2037,8 +2107,11 @@ function taskChips(t) {
   const provider = t.provider || 'mixroute';
   const providerLabel = Object.hasOwn(PROVIDERS, provider) ? PROVIDERS[provider].label : provider;
   if (t.kind === 'image') {
-    const parts = [providerLabel, imageSpecOf(t)?.label || t.model, /-edit$/.test(t.model || '') ? '改圖' : '文字生圖'];
+    // GPT Image 看模型 ID（…-edit）；Gemini 改圖和文字生圖是同一個 ID，看有沒有參考圖
+    const edit = /-edit$/.test(t.model || '') || (t.media || []).some(m => m.type === 'reference_image');
+    const parts = [providerLabel, imageSpecOf(t)?.label || t.model, edit ? '改圖' : '文字生圖'];
     if (p.size) parts.push(p.size.replace('x', '×'), `品質 ${p.quality}`, `${p.n || 1} 張`, FORMAT_LABEL[p.output_format] || p.output_format);
+    else if (p.image_size) parts.push(p.aspect_ratio, p.image_size, FORMAT_LABEL[p.image_output_format] || p.image_output_format);
     if (p.background && p.background !== 'auto') parts.push(`${BG_LABEL[p.background] || p.background}背景`);
     if (p.moderation === 'low') parts.push('寬鬆審核');
     return h('div', { class: 'meta-chips' }, parts.filter(Boolean).map(text => h('span', { text })));
@@ -2061,7 +2134,7 @@ function buildTask(t) {
   if (t.prompt) prompt.addEventListener('click', () => prompt.classList.toggle('open'));
   const usage = t.usage || {};
   const actions = [];
-  const files = taskFiles(t), image = t.kind === 'image';
+  const files = taskFiles(t), image = t.kind === 'image', usageText = image ? imageUsageText(t) : '';
   if (files.length) {
     actions.push(h('button', { class: 'btn small', type: 'button', text: revealLabel(), onclick: () => reveal(files[0]) }));
   }
@@ -2102,7 +2175,7 @@ function buildTask(t) {
     images,
     t.error ? h('div', { class: 'err', text: t.error }) : null,
     usage.output_video_duration ? h('div', { class: 'soft', text: `輸出 ${usage.output_video_duration} 秒${usage.SR ? ' · ' + usage.SR + 'P' : ''}` }) : null,
-    image && t.usage ? h('div', { class: 'soft', text: imageUsageText(t) }) : null,
+    usageText ? h('div', { class: 'soft', text: usageText }) : null,
     h('div', { class: 'task-actions' }, actions, shownId ? h('span', { class: 'id', text: shownId, title: shownId }) : null));
 }
 function renderTasks() {
@@ -2240,7 +2313,7 @@ function reuseImageTask(t) {
   state.imageModel = spec.id;
   state.prompt = t.prompt || '';
   const p = t.parameters || {};
-  if (p.size) state.imageParams = imageParamsFrom(p, spec);
+  if (p.size || p.image_size) state.imageParams = imageParamsFrom(p, spec);
   itemsOf('image').forEach(it => removeItem(it.id, true));
   for (const m of t.media || []) {
     if (m.type !== 'reference_image') continue;
@@ -2259,8 +2332,13 @@ function reuseImageTask(t) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   toast(`已載入這個任務的設定（${spec.label}）`);
 }
-// 任務紀錄的參數（size 是 WxH）換回表單的設定：尺寸對得上某個比例＋解析度就選它，不然用自訂寬高
+// 任務紀錄的參數（size 是 WxH）換回表單的設定：尺寸對得上某個比例＋解析度就選它，不然用自訂寬高。
+// Gemini 的任務（aspect_ratio、image_size）只換比例、解析度和格式，品質、張數等其他模型的設定維持目前的
 function imageParamsFrom(p, spec) {
+  if (!p.size) {
+    const cur = state.imageParams;
+    return { ...cur, ratio: p.aspect_ratio || cur.ratio, tier: p.image_size || cur.tier, format: p.image_output_format || cur.format };
+  }
   const [w, h] = String(p.size).split('x').map(Number);
   let ratio = 'custom', tier = state.imageParams.tier;
   for (const r of spec.ratios) {
@@ -2734,7 +2812,9 @@ function setModel(id) {
 }
 function modelSummary(m) {
   if (m.kind === 'image') {
-    return `${m.label}：${m.summary}；參考圖最多 ${m.media.reference_image} 張、品質 ${m.qualities.length} 級、每邊最大 ${m.size.max_side} px`;
+    const size = ratioSizing(m) ? `比例 ${m.ratios.length} 種、${Object.keys(m.tiers).join('／')}`
+      : `品質 ${m.qualities.length} 級、每邊最大 ${m.size.max_side} px`;
+    return `${m.label}：${m.summary}；參考圖最多 ${m.media.reference_image} 張、${size}`;
   }
   const n = t => m.media[t] || 0;
   return `${m.label}：${m.duration.min}–${m.duration.max} 秒、${m.resolutions.join('／')}；`
@@ -2823,20 +2903,20 @@ function bindEvents() {
   $('#presetExtend').addEventListener('click', () => { setParams({ ratio: 'adaptive' }); toast('已套用：比例自適應'); });
 
   // 圖片的參數：自訂寬高自動取最接近的 16 的倍數
-  const snap = v => { const k = IM().size.multiple; return Math.max(k, Math.round((Number(v) || 0) / k) * k); };
+  const snap = v => { const k = IM().size?.multiple || 16; return Math.max(k, Math.round((Number(v) || 0) / k) * k); };
   $('#imgW').addEventListener('change', e => setImageParams({ width: snap(e.target.value) }));
   $('#imgH').addEventListener('change', e => setImageParams({ height: snap(e.target.value) }));
   $('#imgNRange').addEventListener('input', e => setImageParams({ n: Number(e.target.value) }));
   $('#imgNNum').addEventListener('change', e => {
-    const r = IM().n;
+    const r = IM().n || { min: 1, max: 1 };
     setImageParams({ n: Math.min(r.max, Math.max(r.min, Math.round(Number(e.target.value) || r.min))) });
   });
   $('#imgCompression').addEventListener('change', e => setImageParams({ compression: Math.min(100, Math.max(0, Math.round(Number(e.target.value) || 0))) }));
   $('#imgModLow').addEventListener('change', e => setImageParams({ moderation: e.target.checked ? 'low' : 'auto' }));
-  $('#resetImageParams').addEventListener('click', () => {
-    const d = IM().defaults;
-    setImageParams({ ...DEFAULT_IMAGE_PARAMS, quality: d.quality, n: d.n, format: d.output_format, compression: d.output_compression,
-      background: d.background, moderation: d.moderation });
+  $('#resetImageParams').addEventListener('click', () => {  // 模型沒有的設定（Gemini 沒有品質、張數…）用共用的預設
+    const d = IM().defaults, D = DEFAULT_IMAGE_PARAMS;
+    setImageParams({ ...D, quality: d.quality ?? D.quality, n: d.n ?? D.n, format: d.output_format ?? D.format,
+      compression: d.output_compression ?? D.compression, background: d.background ?? D.background, moderation: d.moderation ?? D.moderation });
   });
 
   // 放大檢視生成的圖片
