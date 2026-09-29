@@ -14,6 +14,7 @@ Seedream 5.0 Pro 也只有一個 ID，尺寸和 GPT Image 一樣送寬x高，是
 
 欄位：
 - generate／edit：兩個 GMI 模型 ID（只有一個 ID 的模型兩個一樣）；summary：模型選單的說明。
+- file_label：檔名裡的模型名稱（檔名是「日期_時間_模型_名稱」，見 video_ui.py 的 base_stem），不能有空白和檔名不能用的字元。
 - media：參考圖最多幾張（edit 的 image 可以送最多 16 張的陣列）；labels：提示詞裡指稱參考圖的寫法，後面直接接編號。
 - image：參考圖的格式和大小（OpenAI 沒有限制尺寸，只要 ≤ 50 MB；本機圖片經 GMI 的上傳 API，只能是 JPEG／PNG）。
 - sizing：怎麼指定輸出尺寸。"pixels"：送 size（寬x高），網頁可以選比例＋解析度或自訂寬高；
@@ -76,14 +77,14 @@ GPT_IMAGE_25 = {
 
 GPT_IMAGE_25_SUNBURST = {
     **GPT_IMAGE_25,
-    "id": "gpt-image-2.5-sunburst", "label": "GPT Image 2.5 Sunburst",
+    "id": "gpt-image-2.5-sunburst", "label": "GPT Image 2.5 Sunburst", "file_label": "GPT2.5-Sunburst",
     "generate": "gpt-image-2.5-sunburst-generate", "edit": "gpt-image-2.5-sunburst-edit",
     "summary": "細節最好、改圖最精準，速度比 Flare 慢",
 }
 
 GPT_IMAGE_25_FLARE = {
     **GPT_IMAGE_25,
-    "id": "gpt-image-2.5-flare", "label": "GPT Image 2.5 Flare",
+    "id": "gpt-image-2.5-flare", "label": "GPT Image 2.5 Flare", "file_label": "GPT2.5-Flare",
     "generate": "gpt-image-2.5-flare-generate", "edit": "gpt-image-2.5-flare-edit",
     "summary": "最快，適合日常生成和打草稿，價格和 Sunburst 相同",
 }
@@ -94,7 +95,7 @@ GPT_IMAGE_25_FLARE = {
 # edit 的 image 送陣列也收（上游用 image[] 送出）；size 不收 auto。
 GPT_IMAGE_2 = {
     **GPT_IMAGE,
-    "id": "gpt-image-2", "label": "GPT Image 2",
+    "id": "gpt-image-2", "label": "GPT Image 2", "file_label": "GPT2",
     "generate": "gpt-image-2-generate", "edit": "gpt-image-2-edit",
     "summary": "上一代：品質只有低／中／高、不能透明背景，GMI 上的價格比 2.5 高",
     "qualities": ["low", "medium", "high"],
@@ -120,7 +121,7 @@ _GEMINI_1K = {"1:1": (1024, 1024), "4:5": (928, 1152), "5:4": (1152, 928), "3:4"
               "9:16": (768, 1376), "16:9": (1376, 768), "21:9": (1584, 672)}
 GEMINI_3_PRO_IMAGE = {
     "kind": "image", "provider": "gmi",
-    "id": "gemini-3-pro-image", "label": "Gemini 3 Pro Image",
+    "id": "gemini-3-pro-image", "label": "Gemini 3 Pro Image", "file_label": "Gemini3Pro",
     "generate": "gemini-3-pro-image", "edit": "gemini-3-pro-image",
     "summary": "Google 的 Nano Banana Pro：寫實、圖中文字、多張參考圖合成強；不能自訂寬高",
     "prompt_required": True, "prompt_max": 2000,
@@ -158,7 +159,7 @@ GEMINI_3_PRO_IMAGE = {
 # - 價格：每張 $0.085，不分尺寸。
 SEEDREAM_50_PRO = {
     "kind": "image", "provider": "gmi",
-    "id": "seedream-5.0-pro", "label": "Seedream 5.0 Pro",
+    "id": "seedream-5.0-pro", "label": "Seedream 5.0 Pro", "file_label": "Seedream5.0Pro",
     "generate": "seedream-5.0-pro", "edit": "seedream-5.0-pro",
     "summary": "字節跳動的新一代生圖模型：畫質高，擅長多張參考圖合成和圖中文字",
     "prompt_required": True, "prompt_max": None,

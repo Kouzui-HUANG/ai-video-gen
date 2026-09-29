@@ -22,8 +22,10 @@
   Litterbox (litterbox.catbox.moe) 取得臨時公開網址，到期自動刪除，期間拿到連結的人都能下載。
 - GMI：素材只收公開網址，本機圖片、影片、音訊在送出時上傳到 GMI 自己的儲存空間取得公開網址
   （拿到連結的人都能下載）；不支援文件和網頁素材。
-- 完成的影片存成 <task_id>.mp4，圖片存成 <request_id>.png（一次多張時加 -1、-2…），放在輸出資料夾：預設是 outputs/，
-  可以在選項改成別的資料夾（只影響之後的檔案，任務紀錄記著每個檔案存在哪裡）。
+- 完成的影片、圖片存成「日期_時間_模型_名稱」，例如 2026-09-28_1432_Seedance2.5_橘貓伸懶腰.mp4（一次多張的圖片加 -1、-2…；
+  名稱是送出時取的，沒取就從提示詞取，任務卡片上可以改名，檔案跟著改），放在輸出資料夾：預設是 outputs/，
+  可以在選項改成別的資料夾（只影響之後的檔案，任務紀錄記著每個檔案存在哪裡）。更新前下載的檔案維持 <task_id>.mp4、
+  <request_id>.png。生成設定寫在檔案裡（media_meta.py；有內容憑證的圖片不寫，記檔案雜湊），拖回網頁的任務區就能還原。
   任務紀錄在 outputs/tasks.json；加入過的本機素材副本在 outputs/inputs/（重用設定、臨時連結過期重傳時會用到）。
 - 網頁右上角的齒輪是「選項」：主題（跟隨系統／亮色／暗色）、語言（目前只有繁體中文）、啟動時自動更新、
   任務完成時的通知與提示音、輸出資料夾，存在 outputs/settings.json。通知和提示音由網頁發出，網頁要開著（在背景也可以）。
@@ -44,6 +46,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 import uuid
 import webbrowser
 from collections import Counter
@@ -58,6 +61,7 @@ import requests
 import gmi_image
 import gmi_video
 import image_models
+import media_meta
 import updater
 import video_models
 import mixroute_video
@@ -109,6 +113,7 @@ SETTING_CHOICES = {
     "language": ("zh-Hant",),  # 語言切換先留位置，之後再加 en
     "notify": (False, True),  # 任務完成、失敗時跳系統通知（瀏覽器另外要允許）
     "sound": (False, True),  # 任務完成、失敗時播放提示音
+    "embed_meta": (True, False),  # 把生成設定寫進生成的影片、圖片（media_meta.py），拖回網頁就能還原
 }
 DEFAULT_SETTINGS = {name: choices[0] for name, choices in SETTING_CHOICES.items()}
 # 輸出資料夾：生成的影片、圖片存在哪裡。None 是專案的 outputs/，不然是使用者選的完整路徑（能不能用，存的時候和下載時才檢查）
@@ -633,6 +638,7 @@ def create_task(body):
         "task_id": task_id,
         "provider": provider,
         "model": spec["id"],
+        "name": clean_name(body.get("name")) or None,  # 檔名用的名稱（見 base_stem），沒取是 None
         "created_at": time.time(),
         "mode": body.get("mode") or "",
         "prompt": prompt,
@@ -789,6 +795,7 @@ def create_image_task(body):
         "provider": "gmi",
         "model": model,
         "family": spec["id"],
+        "name": clean_name(body.get("name")) or None,
         "created_at": time.time(),
         "prompt": prompt,
         "parameters": parameters,
@@ -857,9 +864,11 @@ def _run_image(task_id):
             if record is None:
                 return
         store.update(task_id, downloading=True)
-        files, folder, note = download_images(record.get("request_id") or task_id, record.get("result_urls") or [],
-                                              image_format(record.get("parameters")))
+        base = record.get("stem") or legacy_base(record, record.get("request_id") or task_id) or ensure_stem(task_id)
+        files, folder, note = download_images(base, record.get("result_urls") or [], image_format(record.get("parameters")),
+                                              embed_for(task_id))
         store.update(task_id, files=files, dir=folder_field(folder), notice=note, downloading=False, polling=False)
+        remember_digests(task_id, [folder / f for f in files])
     except _TaskRemoved:
         pass
     except gmi_image.RequestFailed as e:
@@ -929,8 +938,11 @@ def _run_part(task_id, index, key):
                 fields["usage"] = usage
             save(**fields)
             part = current()
-        files, folder, note = download_images(part["request_id"], part["result_urls"], image_format(part["parameters"]))
+        base = legacy_base(store.get(task_id) or {}, part["request_id"]) or f"{ensure_stem(task_id)}-{index + 1}"
+        files, folder, note = download_images(base, part["result_urls"], image_format(part["parameters"]),
+                                              embed_for(task_id, index))
         save(files=files, dir=folder_field(folder), notice=note, error="")
+        remember_digests(task_id, [folder / f for f in files])
     except _TaskRemoved:
         pass
     except gmi_image.RequestFailed as e:
@@ -1174,11 +1186,10 @@ def find_output(rel):
     return None
 
 
-def download_images(base, urls, fmt=None):
-    """把一個請求生成的圖片存到輸出資料夾，檔名用 GMI 的 request_id（一次多張時加 -1、-2…）；已經下載過的不重下。
+def download_images(base, urls, fmt=None, finish=None):
+    """把一個請求生成的圖片存成 <base>.<副檔名>（一次多張時加 -1、-2…）；已經下載過的不重下。
+    base 是任務的主檔名（見 ensure_stem），更新前的任務是 GMI 的 request_id。finish 見 gmi_image.download。
     回傳 (檔名, 資料夾, 提醒)，見 save_output。"""
-    base = safe_name(base)
-
     def save(folder):
         files = []
         for i, url in enumerate(urls, 1):
@@ -1187,10 +1198,350 @@ def download_images(base, urls, fmt=None):
             if not path:
                 if urlparse(url).scheme not in ("http", "https"):
                     raise RuntimeError(f"圖片網址不正確：{url[:300]}")
-                path = gmi_image.download(url, folder, stem, fmt)
+                path = gmi_image.download(url, folder, stem, fmt, finish)
             files.append(path.name)
         return files
     return save_output(save)
+
+
+# ---------- 檔名、檔案裡的生成設定 ----------
+# 生成的檔案存成「日期_時間_模型_名稱」，例如 2026-09-28_1432_Seedance2.5_橘貓伸懶腰.mp4：時間是送出的時間，
+# 模型是 video_models.py／image_models.py 的 file_label，名稱是使用者取的（沒取就從提示詞取，見 auto_name）。
+# 一次多張的圖片加 -1、-2…；和別的任務撞名時加 _2、_3…。主檔名在第一次下載時決定，記在任務的 stem：
+# 查詢中斷後重新下載、多張圖片陸續下載都用同一個。更新前的任務沿用 task_id、request_id 命名的舊檔案。
+NAME_MAX = 40  # 自己取的名稱最多幾個字
+AUTO_NAME_WIDTH = 40  # 從提示詞取的名稱最多多寬（中日韓文字算 2）
+BAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')  # Windows 的檔名不能用的字元
+SURROGATES = re.compile(r"[\ud800-\udfff]")  # 落單的半個 emoji（網頁切字串切到一半）：存不進 UTF-8 的 tasks.json
+NAME_FIELD = re.compile(r"""^[\s>*#-]*["']?(?:summary|title|name|標題|名稱|主題)["']?\s*[:：]\s*(.+)$""", re.I)
+BARE_KEY = re.compile(r"""^[\s>*#-]*[\w"' .-]+[:：]\s*$""")  # 只有欄位名稱的一行，例如 YAML 的 project_meta:
+CLAUSE_END = re.compile(r"[，。！？；、,!?;]|\.(?=\s|$)")
+INDEX_SUFFIX = re.compile(r"-\d+")  # 一次多張的編號
+FILE_SUFFIX = re.compile(r"(-\d+)?\..*", re.S)  # 主檔名後面：一次多張的編號（可以沒有）和副檔名
+EXT_SUFFIX = re.compile(r"\..*", re.S)  # 主檔名後面直接是副檔名
+# 寫進檔案的生成設定（media_meta）：任務的這些欄位，和素材的這些欄位
+META_KEYS = ("name", "prompt", "negative_prompt", "provider", "model", "family", "mode", "parameters", "count",
+             "task_id", "request_id", "created_at")
+META_MEDIA_KEYS = ("type", "name", "ref", "local", "width", "height", "duration", "bytes")
+_stem_lock = threading.Lock()  # 決定主檔名（ensure_stem）和改名（rename_task）一次只做一個，才不會兩個任務選到同一個
+
+
+def clean_name(text, limit=NAME_MAX):
+    """檔名能用的名稱：拿掉不能用的字元、連續的空白變一個、去掉頭尾的空白和句點，最多 limit 個字。"""
+    text = BAD_NAME_CHARS.sub(" ", unicodedata.normalize("NFC", SURROGATES.sub("", str(text or ""))))
+    return re.sub(r"\s+", " ", text).strip(" .")[:limit].strip(" .")
+
+
+def auto_name(prompt):
+    """沒取名時從提示詞取名稱：前幾行有 summary:、title: 這類欄位時用它的內容，不然用第一行（跳過 project_meta: 這種
+    只有欄位名稱的行）；取到第一個逗號、句號之類的標點，最多 AUTO_NAME_WIDTH 寬，英文盡量切在空白處。"""
+    lines = [line.strip() for line in str(prompt or "").splitlines() if line.strip()]
+    text = None
+    for i, line in enumerate(lines[:40]):
+        m = NAME_FIELD.match(line[:500])
+        if m:
+            text = m.group(1).strip()
+            if text in ("|", ">", "|-", ">-", "|+", ">+") and i + 1 < len(lines):  # YAML 的多行字串：內容在下一行
+                text = lines[i + 1]
+            break
+    if text is None:
+        text = next((line for line in lines if not BARE_KEY.match(line[:200])), "")
+    text = clean_name(CLAUSE_END.split(text.strip("\"'「」『』“”‘’`*#>- "), 1)[0], 200)
+    width = 0
+    for i, ch in enumerate(text):
+        width += 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+        if width > AUTO_NAME_WIDTH:
+            space = text.rfind(" ", 0, i)
+            if text[i] != " " and space > i // 2:  # 英文不切在單字中間
+                i = space
+            text = text[:i]
+            break
+    return text.strip(" .")
+
+
+def task_title(record):
+    """任務的名稱：自己取的，沒取就從提示詞取（任務卡片的標題、通知用）。"""
+    return record.get("name") or auto_name(record.get("prompt"))
+
+
+def record_spec(record):
+    """任務用的模型設定（影片看 video_models.py，圖片看 image_models.py），找不到是 None。"""
+    if record.get("kind") == "image":
+        return IMAGE_SPECS.get(record.get("family")) or image_family(record.get("model"))
+    return SPECS.get((record.get("provider") or "mixroute", record.get("model") or DEFAULT_MODEL))
+
+
+def base_stem(record, name=None):
+    """任務的主檔名（還沒處理撞名）：日期_時間_模型_名稱。name 是 None 時用任務的名稱；沒有名稱就從提示詞取。"""
+    spec = record_spec(record) or {}
+    label = spec.get("file_label") or clean_name(spec.get("label") or record.get("model") or "", 30).replace(" ", "")
+    title = clean_name(record.get("name") if name is None else name) or auto_name(record.get("prompt"))
+    stamp = time.strftime("%Y-%m-%d_%H%M", time.localtime(record.get("created_at") or time.time()))
+    return "_".join(p for p in (stamp, label, title) if p)
+
+
+def _name_key(name):
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def is_multi(record):
+    """會存成 <stem>-1、-2… 好幾個檔案的任務（一次多張的圖片）。"""
+    count, n = record.get("count"), (record.get("parameters") or {}).get("n")  # 用 ID 查詢的任務的參數來自 GMI，型別不保證
+    return record.get("kind") == "image" and any(type(x) is int and x > 1 for x in (count, n))
+
+
+def stem_taken(stem, task_id=None, own=(), multi=None):
+    """主檔名是不是有人用了：別的任務的主檔名，或輸出資料夾裡已經有 <stem>.xxx 的檔案（own 是這個任務自己的檔案，
+    改名時不算）。一次多張的檔案（multi：這個任務會不會存成 -1、-2…，沒給就看 task_id 的紀錄）還要避開 -數字：
+    多張任務 X 的第 2 張（X-2.png）會和名稱是 X-2 的任務撞名。macOS、Windows 的檔名不分大小寫，比較時也不分。"""
+    key = _name_key(stem)
+    if multi is None:
+        multi = bool(task_id) and is_multi(store.get(task_id) or {})
+
+    def clash(t):  # 一樣；或多張任務的編號（主檔名加 -數字）剛好是另一個的主檔名
+        other = _name_key(t["stem"])
+        return other == key or (multi and other.startswith(key) and INDEX_SUFFIX.fullmatch(other[len(key):]) is not None) \
+            or (is_multi(t) and key.startswith(other) and INDEX_SUFFIX.fullmatch(key[len(other):]) is not None)
+    if any(t["task_id"] != task_id and t.get("stem") and clash(t) for t in store.all()):
+        return True
+    own = {_name_key(f) for f in own}
+    suffix = FILE_SUFFIX if multi else EXT_SUFFIX
+    for folder in dict.fromkeys((output_dir(), OUTPUTS)):
+        try:
+            names = os.listdir(folder)
+        except OSError:  # 外接硬碟沒接上…：存檔時會改存 outputs/，上面也檢查了
+            continue
+        for name in names:  # <stem>.mp4、下載到一半的 <stem>.mp4.part、多張的 <stem>-2.png…
+            n = _name_key(name)
+            if n not in own and n.startswith(key) and suffix.fullmatch(n[len(key):]):
+                return True
+    return False
+
+
+def pick_stem(base, task_id=None, own=(), multi=None):
+    """base 沒人用就用它，不然加 _2、_3…（最多試 999 次，之後加一段隨機字，保證一定選得出來）"""
+    stem = base
+    for n in range(2, 1000):
+        if not stem_taken(stem, task_id, own, multi):
+            return stem
+        stem = f"{base}_{n}"
+    return f"{base}_{uuid.uuid4().hex[:6]}"
+
+
+def ensure_stem(task_id):
+    """任務的主檔名：第一次下載時決定並記在紀錄上，之後都用同一個。"""
+    with _stem_lock:
+        record = store.get(task_id)
+        if record is None:
+            raise _TaskRemoved
+        if not record.get("stem"):
+            record = store.update(task_id, stem=pick_stem(base_stem(record), task_id))
+            if record is None:
+                raise _TaskRemoved
+        return record["stem"]
+
+
+def legacy_base(record, base):
+    """更新前的圖片任務用 request_id 命名：已經下載了（還沒記進紀錄）的話沿用舊的主檔名，不然是 None。"""
+    base = safe_name(base)
+    for stem in (base, f"{base}-1"):
+        if any(locate(record, f"{stem}.{ext}") for ext in ("png", "jpg", "webp")):
+            return base
+    return None
+
+
+def task_files(record):
+    return record.get("files") or ([record["file"]] if record.get("file") else [])
+
+
+def build_meta(record, part=None):
+    """寫進檔案的生成設定（media_meta），網頁拖回來時照「重用設定」的方式載入。素材只記名稱和本機副本
+    （outputs/inputs/ 的檔名）；上傳到 GMI、Litterbox 的網址不寫，用 ID 查詢的任務也不寫，只留使用者自己貼的網址。"""
+    meta = {"app": media_meta.KEY, "v": 1, "kind": record.get("kind") or "video"}
+    meta.update((k, record[k]) for k in META_KEYS if record.get(k) not in (None, "", [], {}))
+    if part and part.get("request_id"):
+        meta["request_id"] = part["request_id"]
+    media = []
+    for m in record.get("media") or []:
+        item = {k: m[k] for k in META_MEDIA_KEYS if m.get(k) is not None}
+        if m.get("url") and not (m.get("ref") or m.get("local") or record.get("imported")):
+            item["url"] = m["url"]
+        media.append(item)
+    if media:
+        meta["media"] = media
+    if _version:
+        meta["version"] = _version["label"]
+    return meta
+
+
+def write_meta(path, record, part=None):
+    """把生成設定寫進檔案（選項「在檔案裡記下生成設定」關掉時不寫）。有內容憑證的檔案 media_meta 會略過；
+    寫不進去就算了，不影響下載和改名。"""
+    if not _settings.get("embed_meta", True):
+        return
+    try:
+        result = media_meta.write(path, build_meta(record, part))
+    except Exception as e:  # 檔案結構和預期的不一樣之類
+        result = repr(e)
+    if result not in (media_meta.WRITTEN, media_meta.SIGNED):
+        print(f"沒有在 {path.name} 寫入生成設定：{result}")
+
+
+def embed_for(task_id, index=None):
+    """給下載函式的 finish：下載完、換成正式檔名之前寫入生成設定。index 是多張任務的第幾張。"""
+    def finish(path):
+        record = store.get(task_id)
+        if record:
+            parts = record.get("parts") or []
+            write_meta(path, record, parts[index] if index is not None and index < len(parts) else None)
+    return finish
+
+
+def file_digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+        return {"bytes": f.tell(), "sha256": h.hexdigest()}
+
+
+def remember_digests(task_id, paths):
+    """記下檔案的大小和 SHA-256（任務的 hashes：檔名 → {bytes, sha256}）。拖回網頁的檔案沒有生成設定時
+    （有內容憑證的圖片、關掉了寫入設定、更新前的檔案），靠它找回是哪個任務，改過名也認得。"""
+    digests = {}
+    for path in paths:
+        try:
+            digests[path.name] = file_digest(path)
+        except OSError:
+            pass
+    if digests:
+        store.mutate(task_id, lambda r: {"hashes": {**(r.get("hashes") or {}), **digests}})
+
+
+def preview_files(body):
+    """網頁「名稱」下面顯示的檔名：照現在的時間、模型和名稱（沒填就從提示詞取）算，規則和下載時一樣。"""
+    if body.get("kind") == "image":
+        spec = image_spec_of(body.get("model"))
+        record = {"kind": "image", "family": spec["id"], "model": spec["generate"]}
+        ext = {"jpeg": "jpg"}.get(body.get("format"), body.get("format"))
+        ext = ext if ext in ("png", "jpg", "webp") else "png"
+        count = body.get("count") if type(body.get("count")) is int and 1 <= body["count"] <= 10 else 1
+    else:
+        provider = provider_of(body.get("provider"))
+        record = {"provider": provider, "model": spec_of(provider, body.get("model"))["id"]}
+        ext, count = "mp4", 1
+    record.update(created_at=time.time(), name=clean_name(body.get("name")), prompt=str(body.get("prompt") or ""))
+    stem = pick_stem(base_stem(record), multi=count > 1)
+    return {"files": [f"{stem}.{ext}"] if count == 1 else [f"{stem}-{i}.{ext}" for i in range(1, count + 1)]}
+
+
+def rename_task(task_id, raw, dry_run=False):
+    """任務改名，檔案跟著改名（主檔名的日期、時間和模型不變）。還沒有檔案的任務只改名稱，下載時才用新的名稱；
+    被移走、刪掉的檔案不改。dry_run 只算出新的檔名。回傳 {"files": 新的檔名, "stem": 新的主檔名, "missing": 沒改到的數量}。"""
+    name = clean_name(raw)
+    with _stem_lock:
+        record = store.get(task_id)
+        if record is None:
+            raise ValueError("找不到這個任務")
+        files, old = task_files(record), record.get("stem")
+        busy = record.get("polling") or record.get("downloading")
+        if files and busy:
+            raise ValueError("還有圖片在生成，全部完成後再改名")
+        if not files and old and busy:
+            raise ValueError("檔案正在下載，下載完再改名")
+        stem = pick_stem(base_stem(record, name), task_id, files)
+        # 新的檔名：沿用舊主檔名後面的部分（-2.png 之類）。更新前的檔案（request_id 命名）：多張任務照第幾張
+        # （和之後下載的 <stem>-第幾張 一致，還沒完成的那張補下載時才不會撞到別張），其他照順序換成 .副檔名 或 -N.副檔名
+        index = {f: i for i, p in enumerate(record.get("parts") or [], 1) for f in p.get("files") or []}
+
+        def new_name(i, f):
+            if old and f.startswith(old):
+                return stem + f[len(old):]
+            n = index.get(f) or (i if len(files) > 1 else None)
+            return stem + (f"-{n}" if n else "") + Path(f).suffix
+        plan = [(f, new_name(i, f)) for i, f in enumerate(files, 1)]
+        if dry_run:
+            return {"files": [new for _, new in plan], "stem": stem, "missing": 0}
+        done, renamed = [], {}
+        try:
+            for f, new in plan:
+                path = locate(record, f)
+                if path is None:
+                    continue
+                target = path.with_name(new)
+                # 目標已經存在（不該發生）就停下，不能蓋掉別的檔案；只差大小寫時是同一個檔案，照樣改
+                if target.exists() and not os.path.samefile(path, target):
+                    raise FileExistsError(f"已經有叫 {new} 的檔案")
+                os.rename(path, target)
+                done.append((path, target))
+                renamed[f] = new
+        except OSError as e:
+            for src, dst in reversed(done):
+                try:
+                    os.rename(dst, src)
+                except OSError:
+                    pass
+            reason = str(e) if isinstance(e, FileExistsError) else folder_error(e)
+            raise ValueError(f"無法改名：{reason}（檔案可能正在被其他程式使用）") from None
+
+        def apply(r):
+            fields = {"name": name or None, "stem": stem if renamed else (None if not files else old)}
+            if r.get("file"):
+                fields["file"] = renamed.get(r["file"], r["file"])
+            if r.get("files"):
+                fields["files"] = [renamed.get(f, f) for f in r["files"]]
+            if r.get("parts"):
+                fields["parts"] = [{**p, "files": [renamed.get(f, f) for f in p["files"]]} if p.get("files") else p
+                                   for p in r["parts"]]
+            if r.get("hashes"):
+                fields["hashes"] = {renamed.get(f, f): v for f, v in r["hashes"].items()}
+            return fields
+        record = store.mutate(task_id, apply)
+        if record is None:
+            raise ValueError("找不到這個任務")
+        paths = [dst for _, dst in done]
+        for path in paths:  # 檔案裡的名稱也換成新的（有內容憑證的不動）
+            part = next((p for p in record.get("parts") or [] if path.name in (p.get("files") or [])), None)
+            write_meta(path, record, part)
+        remember_digests(task_id, paths)
+        return {"files": [renamed.get(f, f) for f in files], "stem": stem, "missing": len(files) - len(renamed)}
+
+
+def find_task_by_file(name, size, sha256=None):
+    """拖回網頁、沒有生成設定的檔案是哪個任務的：先比檔名（大小也要一樣），再比 SHA-256（改過名、搬過家也認得）。
+    只算大小相同的檔案的雜湊，還沒記過的（更新前下載的）算一次記下來。
+    回傳 {"task_id": …}（找不到是 None），或是有大小相同的檔案、要網頁算雜湊時回 {"need_hash": True}。"""
+    key = _name_key(str(name or ""))
+    candidates = []
+    for t in store.all():
+        hashes = t.get("hashes") or {}
+        for f in task_files(t):
+            info, path = hashes.get(f), None
+            if not info:
+                path = locate(t, f)
+                try:
+                    info = {"bytes": path.stat().st_size} if path else None
+                except OSError:
+                    info = None
+            if not info or info.get("bytes") != size:
+                continue
+            if _name_key(f) == key:
+                return {"task_id": t["task_id"]}
+            candidates.append((t, f, info, path))
+    if not candidates:
+        return {"task_id": None}
+    if not sha256:
+        return {"need_hash": True}
+    for t, f, info, path in candidates:
+        if not info.get("sha256"):
+            path = path or locate(t, f)
+            if path is None:
+                continue
+            remember_digests(t["task_id"], [path])
+            info = (store.get(t["task_id"]) or {}).get("hashes", {}).get(path.name) or {}
+        if info.get("sha256") == sha256:
+            return {"task_id": t["task_id"]}
+    return {"task_id": None}
 
 
 def task_spec(task_id):
@@ -1282,12 +1633,17 @@ def _poll(task_id):
             store.update(task_id, finished_at=time.time())
         if urlparse(video_url).scheme not in ("http", "https"):
             raise RuntimeError(f"任務成功但沒有有效的影片網址：{video_url[:300]}")
-        name = f"{safe_name(task_id)}.mp4"
+        legacy = f"{safe_name(task_id)}.mp4"  # 更新前的檔名：已經下載好、還沒記進紀錄的話沿用
+        if record.get("stem"):
+            name = f"{record['stem']}.mp4"
+        else:
+            name = legacy if locate(record, legacy) else f"{ensure_stem(task_id)}.mp4"
         path, note = locate(record, name), record.get("notice") or ""
         if path is None:
             store.update(task_id, downloading=True)
-            path, _, note = save_output(lambda folder: mixroute_video.download(video_url, folder / name))
+            path, _, note = save_output(lambda folder: mixroute_video.download(video_url, folder / name, embed_for(task_id)))
         store.update(task_id, file=name, dir=folder_field(path.parent), notice=note, downloading=False, polling=False)
+        remember_digests(task_id, [path])
     except _TaskRemoved:
         pass
     except TimeoutError:
@@ -1637,8 +1993,10 @@ class Handler(BaseHTTPRequestHandler):
                     "update": _update,
                 })
             if path == "/api/tasks":
-                # 選項也一起帶回去：在別的分頁或瀏覽器改了（例如關掉通知），開著的網頁跟著更新
-                return self._send_json({"tasks": store.all(), "now": time.time(), "settings": _settings})
+                # 選項也一起帶回去：在別的分頁或瀏覽器改了（例如關掉通知），開著的網頁跟著更新。
+                # title：任務卡片的標題（自己取的名稱，沒取就從提示詞取）
+                tasks = [dict(t, title=task_title(t)) for t in store.all()]
+                return self._send_json({"tasks": tasks, "now": time.time(), "settings": _settings})
             if path == "/api/outputs-dir":
                 return self._send_json({"storage": storage_status()})
             if path.startswith("/outputs/"):
@@ -1696,6 +2054,15 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST" and path == "/api/tasks":
             body = self._read_json()
             return self._send_json(create_image_task(body) if body.get("kind") == "image" else create_task(body))
+        if method == "POST" and path == "/api/filename":  # 「名稱」下面顯示這次會存成什麼檔名
+            return self._send_json(preview_files(self._read_json()))
+        if method == "POST" and path == "/api/find-output":
+            # 拖回網頁、沒有生成設定的檔案是哪個任務的：{"name", "size"}，要比內容時網頁再帶 "sha256" 送一次
+            body = self._read_json()
+            size, digest = body.get("size"), body.get("sha256")
+            if type(size) is not int or size < 0 or (digest is not None and not re.fullmatch(r"[0-9a-f]{64}", str(digest))):
+                raise ValueError("檔案資訊不正確")
+            return self._send_json(find_task_by_file(body.get("name"), size, digest))
         if method == "POST" and path == "/api/preview":
             body = self._read_json()
             if body.get("kind") == "image":  # count：同一個請求要送出幾次（一次只生成一張的模型要多張時）
@@ -1721,11 +2088,14 @@ class Handler(BaseHTTPRequestHandler):
                            "prompt": "", "parameters": {}, "media": [], "status": "QUEUED", "progress": ""})
             start_poller(task_id)
             return self._send_json(store.get(task_id))
-        m = re.fullmatch(r"/api/tasks/([^/]+)(/refresh)?", path)
+        m = re.fullmatch(r"/api/tasks/([^/]+)(/refresh|/rename)?", path)
         if m:
             task_id = unquote(m.group(1))
             if not store.get(task_id):
                 return self._send_json({"error": "找不到這個任務"}, 404)
+            if method == "POST" and m.group(2) == "/rename":  # {"name": "…", "dry_run": true 只算出新的檔名}
+                body = self._read_json()
+                return self._send_json(rename_task(task_id, body.get("name"), dry_run=bool(body.get("dry_run"))))
             if method == "POST" and m.group(2):
                 store.update(task_id, error="")
                 start_poller(task_id)

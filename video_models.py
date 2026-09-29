@@ -17,6 +17,7 @@
 - real_faces：素材裡能不能有擬真的人臉（Seedance 不行，真人照片和 AI 生成的都一樣）。
 - image／video：素材的格式、尺寸限制（max_mb：每個檔案的大小上限）。image.formats 是本機圖片能用的格式（GMI 的上傳 API 只收 JPEG／PNG）。
 - labels：提示詞裡指稱素材的寫法（图1、@Image1、Image 1…），後面直接接編號。
+- file_label：檔名裡的模型名稱（檔名是「日期_時間_模型_名稱」，見 video_ui.py 的 base_stem），不能有空白和檔名不能用的字元。
 - frame_ratio：首尾幀模式的比例，"suggest" 建議用自適應，"force" 一定是自適應。
 - video_edit：能不能做影片編輯（編輯要時長 -1 的模型，在不支援 -1 的 API 上會失敗）。
 - notes：顯示在各區塊說明後面的提醒（image／video／audio／frame），price 是有參考影片時接在預估費用後面的說明。
@@ -31,7 +32,7 @@ WAN_VIDEO = {"min_side": 240, "max_side": 4096, "max_ratio": 8}
 
 # 文件：https://docs.mixroute.ai/en/model-api/alibaba/wan3.0-video
 MIXROUTE_WAN = {
-    "provider": "mixroute", "id": "wan3.0-video", "label": "Wan 3.0",
+    "provider": "mixroute", "id": "wan3.0-video", "label": "Wan 3.0", "file_label": "Wan3.0",
     "prompt_max": 20000, "negative_max": 0, "prompt_required": False,
     "resolutions": ["480P", "720P", "1080P"], "ratios": WAN_RATIOS, "text_adaptive": True,
     "defaults": {"resolution": "480P", "ratio": "16:9", "duration": 2, "audio": False},
@@ -69,7 +70,7 @@ SEEDANCE_VIDEO = {"min_side": 300, "max_side": 6000, "max_ratio": 2.5, "min_pixe
 # 參考音訊不能單獨用。2026-09 經 GMI 實測：文件說提示詞可省略，但空的提示詞會失敗（content must include at least
 # one text item）；時長 -1 預扣費用失敗；4k 在模型說明的選項裡有，但沒有價格，GMI 文件也只列 480p／720p／1080p，所以不放。
 GMI_SEEDANCE_20 = {
-    "provider": "gmi", "id": "seedance-2-0-260128", "label": "Seedance 2.0",
+    "provider": "gmi", "id": "seedance-2-0-260128", "label": "Seedance 2.0", "file_label": "Seedance2.0",
     "prompt_max": None, "negative_max": 0, "prompt_required": True,
     "resolutions": ["480p", "720p", "1080p"],
     "ratios": ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"], "text_adaptive": True,
@@ -99,7 +100,7 @@ GMI_SEEDANCE_20 = {
 # 經 GMI 呼叫時以 GMI 的限制為準（2026-09 實測）：參考圖最多 9 張（多送回 400）、影片和音訊各 3 段；
 # 只有 480p／720p（1080p 回「找不到價格」）；時長不能送 -1（建立請求時預扣費用會失敗）。
 GMI_SEEDANCE_25 = {
-    "provider": "gmi", "id": "seedance-2-5-260628", "label": "Seedance 2.5",
+    "provider": "gmi", "id": "seedance-2-5-260628", "label": "Seedance 2.5", "file_label": "Seedance2.5",
     "prompt_max": None, "negative_max": 0, "prompt_required": True,
     "resolutions": ["480p", "720p"],
     "ratios": ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"], "text_adaptive": True,
@@ -130,7 +131,7 @@ GMI_SEEDANCE_25 = {
 # 和 Seedance 的差異：768P／2K；一律產生音軌（原生立體聲），沒有 seed、浮水印等開關；純文字生影片一定要指定比例
 # （不能自適應），首尾幀模式的比例固定自適應（送別的也會被當成自適應）；素材合計最多 12 個；影片 ≤ 50 MB、23.976–60 fps。
 GMI_MINIMAX_H3 = {
-    "provider": "gmi", "id": "MiniMax-H3", "label": "MiniMax H3",
+    "provider": "gmi", "id": "MiniMax-H3", "label": "MiniMax H3", "file_label": "MiniMaxH3",
     "prompt_max": 7000, "negative_max": 0, "prompt_required": True,
     "resolutions": ["768P", "2K"],
     "ratios": ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"], "text_adaptive": False,

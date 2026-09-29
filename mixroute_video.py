@@ -100,9 +100,9 @@ def wait_for_task(session, task_id, timeout=1200, interval=15, on_update=None):
     raise TimeoutError(f"任務仍未完成，稍後可用 --task-id {task_id} 接續查詢")
 
 
-def download(url, path):
+def download(url, path, finish=None):
     # 影片網址是簽名連結，不帶 API key 直接下載，避免把 key 送到第三方主機
-    # 先寫到 .part 再改名，中途失敗不會留下看似完整的檔案
+    # 先寫到 .part 再改名，中途失敗不會留下看似完整的檔案；finish(.part 的路徑) 在改名前處理檔案（video_ui.py 寫入生成設定）
     path.parent.mkdir(parents=True, exist_ok=True)
     part = path.with_name(path.name + ".part")
     with requests.get(url, stream=True, timeout=120) as resp:
@@ -110,6 +110,8 @@ def download(url, path):
         with open(part, "wb") as f:
             for chunk in resp.iter_content(chunk_size=1 << 20):
                 f.write(chunk)
+    if finish:
+        finish(part)
     os.replace(part, path)
     return path
 

@@ -153,10 +153,11 @@ def sniff(head):
     return None
 
 
-def download(url, folder, stem, fmt=None):
+def download(url, folder, stem, fmt=None, finish=None):
     """下載一張圖片存成 folder/<stem>.<副檔名>，副檔名看檔案內容（認不出來才用 output_format），回傳路徑。
 
     圖片網址本身就能下載，不帶 API key；先寫到 .part 再改名，中途失敗不會留下看似完整的檔案。
+    finish(.part 的路徑) 在改名前處理檔案（video_ui.py 寫入生成設定）。
     """
     folder.mkdir(parents=True, exist_ok=True)
     part = folder / f"{stem}.part"
@@ -168,5 +169,7 @@ def download(url, folder, stem, fmt=None):
     with open(part, "rb") as f:
         ext = sniff(f.read(12)) or {"jpeg": "jpg"}.get(fmt, fmt) or "png"
     path = folder / f"{stem}.{ext}"
+    if finish:
+        finish(part)
     os.replace(part, path)
     return path

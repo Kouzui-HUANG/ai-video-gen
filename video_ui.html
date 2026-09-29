@@ -288,6 +288,13 @@ textarea { width: 100%; resize: vertical; min-height: 140px; line-height: 1.6; d
 .issues li.error { background: var(--err-weak); color: var(--err); }
 .issues li.warn { background: var(--warn-weak); color: var(--warn); }
 .issues li.info { background: var(--panel-2); color: var(--muted); }
+/* 名稱：檔名「日期_時間_模型_名稱」的名稱，下面顯示這次會存成什麼檔名 */
+.name-box { margin-bottom: 12px; }
+.name-row { display: flex; align-items: center; gap: 10px; }
+.name-row label { font-size: 15px; font-weight: 650; flex: none; }
+.name-row input { flex: 1; min-width: 0; }
+.file-hint { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); word-break: break-all; }
+.file-hint b { font-weight: 500; color: var(--text); }
 .submit-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .kbd { font-size: 12px; color: var(--faint); }
 .submit-row .link-btn { margin-left: auto; }
@@ -299,9 +306,14 @@ pre.preview {
 /* ---------- 任務 ---------- */
 .tasks-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .tasks-h h2 { font-size: 16px; }
+.tasks-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .import { display: flex; gap: 6px; }
 .import input { width: 220px; max-width: 50vw; padding: 5px 9px; font-size: 13px; }
 .task-list { display: flex; flex-direction: column; gap: 12px; }
+/* 拖檔案時任務區上方的提示：放在這裡是還原設定，放在左邊是加入素材 */
+.restore-drop { display: none; position: sticky; top: 0; z-index: 2; margin-bottom: 12px; padding: 14px; border: 1.5px dashed var(--accent); border-radius: var(--radius); background: var(--panel); color: var(--accent); text-align: center; font-size: 13px; font-weight: 600; }
+body.file-drag .restore-drop { display: block; }
+.tasks.drop-hot .restore-drop { background: var(--accent-weak); }
 .task { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); min-width: 0; }
 .task-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
@@ -314,6 +326,13 @@ pre.preview {
 .task-bar i { display: block; height: 100%; background: var(--run); transition: width .4s; }
 .task-bar.indeterminate i { width: 30% !important; animation: slide 1.4s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.task-name { display: flex; align-items: center; gap: 4px; margin-top: 8px; min-width: 0; }
+.task-name b { font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.task-name b.auto { font-weight: 600; color: var(--muted); }  /* 沒取名，名稱是從提示詞取的 */
+.task-name .edit { flex: none; display: inline-grid; place-items: center; border: 0; background: none; padding: 3px; border-radius: 6px; color: var(--faint); }
+.task-name .edit:hover { color: var(--accent); background: var(--accent-weak); }
+.task-name .edit svg { width: 14px; height: 14px; }
+.task .file-line { word-break: break-all; }
 .task-prompt {
   margin: 10px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 13.5px;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer;
@@ -369,6 +388,9 @@ dialog p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
 dialog input[type="password"] { width: 100%; }
 dialog .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 dialog .dlg-err { color: var(--err); font-size: 13px; margin-top: 8px; }
+#renameInput { width: 100%; }
+.rename-files { margin: 10px 0 0; font-size: 12.5px; word-break: break-all; }
+.rename-files b { font-weight: 500; color: var(--text); }
 
 /* 選項 */
 dialog.settings { width: min(600px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; overflow: auto; }
@@ -619,6 +641,13 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
     </section>
 
     <section class="card">
+      <div class="name-box">
+        <div class="name-row">
+          <label for="taskName">名稱</label>
+          <input type="text" id="taskName" maxlength="40" autocomplete="off" spellcheck="false" placeholder="選填：沒填就用提示詞的開頭">
+        </div>
+        <p class="file-hint" id="fileHint" hidden></p>
+      </div>
       <ul class="issues" id="issues"></ul>
       <div class="submit-row">
         <button class="primary" type="button" id="submitBtn">生成影片</button>
@@ -632,11 +661,15 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
   <section class="tasks" aria-label="任務">
     <div class="tasks-h">
       <h2>任務</h2>
-      <form class="import" id="importForm">
-        <input type="text" id="importId" placeholder="用 task_id 查詢既有任務" aria-label="task_id">
-        <button class="btn small" type="submit">查詢</button>
-      </form>
+      <div class="tasks-tools">
+        <button class="btn small" type="button" id="restoreBtn" title="選一個生成的影片或圖片，把當時的模型、提示詞、參數和素材載入到左邊（也可以直接把檔案拖到任務區）">從檔案還原…</button>
+        <form class="import" id="importForm">
+          <input type="text" id="importId" placeholder="用 task_id 查詢既有任務" aria-label="task_id">
+          <button class="btn small" type="submit">查詢</button>
+        </form>
+      </div>
     </div>
+    <div class="restore-drop" id="restoreDrop">放到這裡：還原這個檔案當時的設定（放在左邊是加入素材）</div>
     <div class="task-list" id="taskList"></div>
     <p class="empty" id="taskEmpty" hidden>還沒有任務。左邊填好後按「生成」，完成的影片和圖片會自動存到輸出資料夾。</p>
   </section>
@@ -652,6 +685,20 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
     <div class="dlg-actions">
       <button class="btn" type="button" id="keyCancel">取消</button>
       <button class="primary" type="submit" id="keySave" style="padding:8px 18px;font-size:14px">儲存</button>
+    </div>
+  </form>
+</dialog>
+<!-- 任務改名：檔案跟著改名（見 video_ui.py 的 rename_task） -->
+<dialog id="renameDialog" aria-labelledby="renameTitle">
+  <form method="dialog" id="renameForm">
+    <h2 id="renameTitle">改名</h2>
+    <p id="renameDesc"></p>
+    <input type="text" id="renameInput" maxlength="40" autocomplete="off" spellcheck="false" placeholder="沒填就用提示詞的開頭" aria-label="名稱">
+    <p class="rename-files" id="renameFiles"></p>
+    <div class="dlg-err" id="renameErr" hidden></div>
+    <div class="dlg-actions">
+      <button class="btn" type="button" id="renameCancel">取消</button>
+      <button class="primary" type="submit" id="renameSave" style="padding:8px 18px;font-size:14px">改名</button>
     </div>
   </form>
 </dialog>
@@ -672,7 +719,7 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
     <a class="btn small" id="viewerOpen" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">開新分頁</a>
   </div>
 </dialog>
-<!-- 選項：主題、語言、自動更新、通知、輸出資料夾存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
+<!-- 選項：主題、語言、自動更新、通知、輸出資料夾、在檔案裡記下生成設定存在伺服器的 outputs/settings.json；標「即將推出」的只是先留位置 -->
 <dialog id="settingsDialog" class="settings" aria-labelledby="settingsTitle">
   <div class="settings-top">
     <h2 id="settingsTitle">選項</h2>
@@ -753,6 +800,10 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
         </div>
         <div class="path-err" id="outDirErr" role="alert" hidden></div>
       </form>
+      <div class="set-row">
+        <label class="set-label" for="embedMeta"><b>在檔案裡記下生成設定</b><small>把模型、提示詞和參數寫進生成的影片和圖片，之後把檔案拖到任務區就能還原。直接把原始檔傳給別人時，對方也讀得到這些設定。有 AI 內容憑證的圖片不會寫入（寫了憑證就會失效），改用任務紀錄比對。</small></label>
+        <input type="checkbox" class="toggle" id="embedMeta" role="switch">
+      </div>
     </section>
 
     <section class="set-group soon" aria-labelledby="setDefaults">
@@ -774,6 +825,7 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
 </dialog>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <input type="file" id="filePicker" hidden multiple>
+<input type="file" id="restorePicker" hidden accept="image/*,video/mp4,video/quicktime,.mp4,.mov">
 
 <!-- 各 API × 模型的參數與素材限制：video_ui.py 送出網頁時把 video_models.py（影片）和 image_models.py（圖片）的內容填進來 -->
 <script id="catalog" type="application/json">__CATALOG__</script>
@@ -846,6 +898,8 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 const extOf = name => (String(name).split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+// 照字（code point）切字串，不會把 emoji 切成兩半（半個 emoji 送到伺服器會存不進 tasks.json）
+const cut = (s, max) => s.length <= max ? s : Array.from(s).slice(0, max).join('');
 const fmtBytes = n => n >= MB ? (n / MB).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 const fmtSec = s => (Math.round(s * 10) / 10) + ' 秒';
 const fmtUsd = v => { const m = Math.round(v * 1000); return '$' + (m / 1000).toFixed(m % 10 ? 3 : 2); };
@@ -893,6 +947,7 @@ const state = {
   items: [],          // 所有素材（兩種模式、各模型共用，送出時只取目前模式和模型用得到的）
   prompt: '',
   negative: '',       // 負面提示詞，只有支援的模型會送出
+  name: '',           // 檔名用的名稱（檔名是「日期_時間_模型_名稱」），影片和圖片共用
   params: { ...DEFAULT_PARAMS },
   imageParams: { ...DEFAULT_IMAGE_PARAMS },
   audio: {},          // 各模型的「產生音軌」：「API/模型」→ true／false，沒設過就用模型的預設
@@ -942,7 +997,7 @@ function saveState() {
       .map(it => Object.fromEntries(PERSIST.filter(k => it[k] !== undefined).map(k => [k, it[k]])));
     localStorage.setItem(STORE_KEY, JSON.stringify({
       kind: state.kind, mode: state.mode, provider: state.provider, model: state.model, lastModel: state.lastModel,
-      imageModel: state.imageModel, prompt: state.prompt, negative: state.negative, params: state.params,
+      imageModel: state.imageModel, prompt: state.prompt, negative: state.negative, name: state.name, params: state.params,
       imageParams: state.imageParams, audio: state.audio, optimize: state.optimize, ttl: state.ttl, items,
     }));
   } catch { /* 無痕模式等情況存不了，不影響使用 */ }
@@ -962,6 +1017,7 @@ function loadState() {
     if (s.imageParams && typeof s.imageParams === 'object') state.imageParams = { ...DEFAULT_IMAGE_PARAMS, ...s.imageParams };
     if (typeof s.prompt === 'string') state.prompt = s.prompt;
     if (typeof s.negative === 'string') state.negative = s.negative;
+    if (typeof s.name === 'string') state.name = cut(s.name, 40);
     state.params = { ...DEFAULT_PARAMS, ...(s.params || {}) };
     if (s.audio && typeof s.audio === 'object') state.audio = { ...s.audio };
     // 舊版只有一個 params.audio，是 MixRoute 的開關（GMI 的 Wan 一律有聲）
@@ -2044,6 +2100,28 @@ function renderIssues() {
   $('#issues').replaceChildren(...issues.map(i => h('li', { class: i.level, text: i.text })));
   $('#submitBtn').disabled = submitting || issues.some(i => i.block);
   if (!$('#previewBox').hidden) renderPreview();
+  renderFileHint();
+}
+// 「名稱」下面顯示這次會存成什麼檔名：伺服器照下載時的規則算（時間是現在，送出時才確定）
+let hintTimer, hintSeq = 0;
+function renderFileHint() {
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(async () => {
+    const mine = ++hintSeq;
+    let files = null;
+    if (serverOk) {
+      let body;
+      if (isImage()) {
+        const s = IM(), e = effectiveImageParams(s);
+        body = { kind: 'image', model: s.id, format: e.format, count: e.count };
+      } else body = { provider: state.provider, model: state.model };
+      try { files = (await api('/api/filename', { method: 'POST', json: { ...body, name: state.name, prompt: state.prompt } })).files; }
+      catch { files = null; }  // 舊版伺服器沒有這個功能
+    }
+    if (mine !== hintSeq) return;
+    $('#fileHint').hidden = !files?.length;
+    if (files?.length) $('#fileHint').replaceChildren('存成 ', h('b', { text: files[0] }), files.length > 1 ? ` 等 ${files.length} 張` : '');
+  }, 150);
 }
 
 // ---------- 送出 ----------
@@ -2058,7 +2136,7 @@ function mediaOf(it) {
 function buildRequest() {
   if (isImage()) {  // 模型送 image_models.py 的 id，伺服器依有沒有參考圖選 generate 或 edit
     const s = IM(), e = effectiveImageParams(s);
-    const req = { kind: 'image', provider: s.provider, model: s.id, prompt: state.prompt.trim(),
+    const req = { kind: 'image', provider: s.provider, model: s.id, prompt: state.prompt.trim(), name: state.name.trim(),
       parameters: e.params, media: activeItems().map(mediaOf) };
     if (multiRequest(s)) req.count = e.count;  // 一次只生成一張的模型：伺服器把同一個請求送出 count 次
     return req;
@@ -2069,6 +2147,7 @@ function buildRequest() {
     model: state.model,
     mode: state.mode,
     prompt: state.prompt.trim(),
+    name: state.name.trim(),
     parameters: effectiveParams(s).params,
     media: activeItems().map(mediaOf),
   };
@@ -2182,10 +2261,17 @@ function taskChips(t) {
   }
   return h('div', { class: 'meta-chips' }, parts.map(text => h('span', { text })));
 }
+const PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 function buildTask(t) {
   const [cls, label] = statusOf(t);
   const busy = !!(t.polling || t.downloading);
   const pct = parseInt(t.progress, 10);
+  // 名稱：自己取的，沒取是從提示詞取的（伺服器算好放在 title）；檔名的最後一段就是它
+  const title = t.title || t.name || '';
+  const edit = h('button', { class: 'edit', type: 'button', title: '改名（檔案跟著改名）', 'aria-label': '改名', onclick: () => openRename(t) });
+  edit.innerHTML = PENCIL;
+  const titleRow = h('div', { class: 'task-name' },
+    h('b', { class: t.name ? '' : 'auto', text: title || '（沒有名稱）', title: t.name ? title : `沒有取名，用提示詞的開頭：${title}` }), edit);
   const prompt = h('p', { class: 'task-prompt' + (t.prompt ? '' : ' none'), text: t.prompt || (t.imported ? '（用 ID 查詢的任務）' : '（沒有提示詞）') });
   if (t.prompt) prompt.addEventListener('click', () => prompt.classList.toggle('open'));
   const usage = t.usage || {};
@@ -2224,6 +2310,7 @@ function buildTask(t) {
       h('span', { class: 'badge ' + cls }, busy ? h('span', { class: 'spin', style: 'width:10px;height:10px' }) : null, label),
       cls === 'running' && t.progress ? h('span', { class: 'count', text: t.progress }) : null,
       h('span', { class: 'time', 'data-start': t.created_at, 'data-end': t.finished_at || '', 'data-busy': busy ? '1' : '' })),
+    titleRow,
     busy && cls !== 'success' ? h('div', { class: 'task-bar' + (Number.isNaN(pct) ? ' indeterminate' : '') }, h('i', { style: `width:${Number.isNaN(pct) ? 0 : pct}%` })) : null,
     prompt,
     t.negative_prompt ? h('p', { class: 'task-neg', text: '負面：' + t.negative_prompt }) : null,
@@ -2235,6 +2322,8 @@ function buildTask(t) {
     t.notice ? h('div', { class: 'soft warn', text: t.notice }) : null,  // 輸出資料夾不能用，改存到 outputs/
     usage.output_video_duration ? h('div', { class: 'soft', text: `輸出 ${usage.output_video_duration} 秒${usage.SR ? ' · ' + usage.SR + 'P' : ''}` }) : null,
     usageText ? h('div', { class: 'soft', text: usageText }) : null,
+    files.length ? h('div', { class: 'soft file-line', title: files.join('\n'),
+      text: '檔案：' + files[0] + (files.length > 1 ? ` 等 ${files.length} 個` : '') }) : null,
     h('div', { class: 'task-actions' }, actions, shownId ? h('span', { class: 'id', text: shownId, title: shownId }) : null));
 }
 function renderTasks() {
@@ -2245,7 +2334,7 @@ function renderTasks() {
   for (const [id, cached] of taskNodes) if (!ids.has(id)) { cached.node.remove(); taskNodes.delete(id); }
   let prev = null;
   for (const t of tasks) {  // 新的在上面；舊卡片不搬動，播放中的影片才不會被打斷
-    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.parts, t.error, t.notice, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, (t.media || []).length, state.platform]);
+    const sig = JSON.stringify([t.status, t.progress, t.file, t.files, t.request_id, t.parts, t.error, t.notice, t.polling, t.downloading, t.finished_at, t.usage, t.prompt, t.model, t.name, t.title, (t.media || []).length, state.platform]);
     let cached = taskNodes.get(t.task_id);
     if (!cached || cached.sig !== sig) {
       const node = buildTask(t);
@@ -2310,14 +2399,15 @@ function revealLabel() {
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast('已複製 ' + text); } catch { prompt('複製這個 task_id：', text); }
 }
-function reuseTask(t) {
-  if (t.kind === 'image') return reuseImageTask(t);
+// 回傳有沒有載入（使用者取消是 false）；opts.fromFile：從檔案還原（見 restoreFromFiles），提示換個說法
+function reuseTask(t, opts = {}) {
+  if (t.kind === 'image') return reuseImageTask(t, opts);
   const wasImage = isImage();
   state.kind = 'video';  // 影片任務載入到影片模式
   const busyForm = state.prompt.trim() || activeItems().length;
-  if (busyForm && !confirm('用這個任務的提示詞、參數和素材取代左邊目前的內容？')) {
+  if (busyForm && !confirm(`用這個${opts.fromFile ? '檔案' : '任務'}的提示詞、參數和素材取代左邊目前的內容？`)) {
     if (wasImage) state.kind = 'image';
-    return;
+    return false;
   }
   const from = t.provider || 'mixroute', model = t.model || DEFAULT_MODEL, before = specKey();
   // 換成這個任務用的模型：目前的 API 也有這個模型就只換模型，沒有的話連 API 一起換
@@ -2328,6 +2418,7 @@ function reuseTask(t) {
   state.mode = t.mode === 'frame' || media.some(m => m.type === 'first_frame') ? 'frame' : 'ref';
   state.prompt = t.prompt || '';
   state.negative = t.negative_prompt || '';
+  state.name = t.name || '';
   const p = t.parameters || {};
   if (p.resolution) {
     state.params = {
@@ -2354,25 +2445,28 @@ function reuseTask(t) {
   }
   $('#prompt').value = state.prompt;
   $('#negPrompt').value = state.negative;
+  $('#taskName').value = state.name;
   renderAll();
   renderKey();
   saveState();
   fixImages();
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  const where = `${P().label} · ${M().label}`;
+  const where = `${P().label} · ${M().label}`, done = opts.fromFile ? '已從檔案還原設定' : '已載入這個任務的設定';
   toast(from !== state.provider || model !== state.model
-    ? `已載入這個任務的設定（原本用 ${PROVIDERS[from]?.label || from} · ${modelLabel(model)} 產生，這次會送到 ${where}）`
-    : wasImage || specKey() !== before ? `已載入這個任務的設定，並切換到 ${where}` : '已載入這個任務的設定');
+    ? `${done}（原本用 ${PROVIDERS[from]?.label || from} · ${modelLabel(model)} 產生，這次會送到 ${where}）`
+    : wasImage || specKey() !== before ? `${done}，並切換到 ${where}` : done);
+  return true;
 }
 // 圖片任務的「重用設定」：切到圖片模式，換上它的模型、提示詞、參數和參考圖（影片用的素材不動）
-function reuseImageTask(t) {
+function reuseImageTask(t, opts = {}) {
   const spec = imageSpecOf(t);
-  if (!spec) { toast(`找不到 ${t.model} 這個圖片模型`, 'error'); return; }
+  if (!spec) { toast(`找不到 ${t.family || t.model} 這個圖片模型`, 'error'); return false; }
   const busyForm = state.prompt.trim() || itemsOf('image').length;
-  if (busyForm && !confirm('用這個任務的提示詞、參數和參考圖取代左邊目前的內容？')) return;
+  if (busyForm && !confirm(`用這個${opts.fromFile ? '檔案' : '任務'}的提示詞、參數和參考圖取代左邊目前的內容？`)) return false;
   state.kind = 'image';
   state.imageModel = spec.id;
   state.prompt = t.prompt || '';
+  state.name = t.name || '';
   const p = t.parameters || {};
   if (p.size || p.image_size) state.imageParams = imageParamsFrom(p, spec);
   if (multiRequest(spec)) state.imageParams.n = t.count || t.parts?.length || 1;  // 張數不在參數裡
@@ -2387,12 +2481,14 @@ function reuseImageTask(t) {
     state.items.push(it);
   }
   $('#prompt').value = state.prompt;
+  $('#taskName').value = state.name;
   renderAll();
   renderKey();
   saveState();
   fixImages();
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  toast(`已載入這個任務的設定（${spec.label}）`);
+  toast(`${opts.fromFile ? '已從檔案還原設定' : '已載入這個任務的設定'}（${spec.label}）`);
+  return true;
 }
 // 任務紀錄的參數換回表單的設定：size（WxH）對得上某個比例＋解析度就選它，不然用自訂寬高；Gemini 的任務是
 // aspect_ratio、image_size。任務裡沒有的設定（例如 Gemini、Seedream 沒有品質和張數）維持目前的，留給其他模型
@@ -2457,6 +2553,207 @@ async function useOutput(target) {
     toast(slot === 'image' ? `已加進參考圖（${labelOf('image', itemsOf('image').length)}）` : `已放到影片的${SLOT_NAME[slot]}`);
   } catch (e) {
     toast('讀不到這張圖：' + e.message, 'error');
+  }
+}
+
+// ---------- 任務改名：檔案跟著改名（video_ui.py 的 rename_task） ----------
+let renaming = null;  // 正在改名的任務
+let renameTimer, renameSeq = 0;
+function openRename(t) {
+  renaming = t;
+  $('#renameDesc').textContent = taskFiles(t).length
+    ? `${t.kind === 'image' ? '圖片' : '影片'}檔會跟著改名。已經匯入剪輯軟體的檔案，改名後要在剪輯軟體裡重新連結。`
+    : statusOf(t)[0] === 'failure' ? '這個任務沒有檔案，只改任務上的名稱。' : '還沒有檔案，下載時會用新的名稱。';
+  $('#renameInput').value = t.name || '';
+  $('#renameErr').hidden = true;
+  $('#renameFiles').replaceChildren();
+  $('#renameDialog').showModal();
+  $('#renameInput').select();
+  previewRename();
+}
+function renamePath(t) { return '/api/tasks/' + encodeURIComponent(t.task_id) + '/rename'; }
+function previewRename() {  // 算出改名後的檔名（dry_run，不動檔案）
+  clearTimeout(renameTimer);
+  renameTimer = setTimeout(async () => {
+    const t = renaming, mine = ++renameSeq;
+    if (!t) return;
+    let res = null, error = '';
+    try { res = await api(renamePath(t), { method: 'POST', json: { name: $('#renameInput').value, dry_run: true } }); }
+    catch (e) { error = e.message; }
+    if (mine !== renameSeq || renaming !== t) return;
+    $('#renameErr').hidden = !error;
+    $('#renameErr').textContent = error;
+    if (!res) { $('#renameFiles').replaceChildren(); return; }
+    const files = res.files, p = t.parameters || {};
+    if (files.length) {
+      $('#renameFiles').replaceChildren('檔案會改成 ', h('b', { text: files[0] }), files.length > 1 ? ` 等 ${files.length} 個` : '');
+    } else if (statusOf(t)[0] === 'failure') {
+      $('#renameFiles').replaceChildren();  // 說明已經寫了只改名稱
+    } else {  // 還在生成：照目前的設定推算會存成什麼
+      const fmt = p.output_format || p.image_output_format || 'png', n = t.parts?.length || p.n || 1;
+      const name = t.kind === 'image' ? `${res.stem}${n > 1 ? '-1' : ''}.${fmt === 'jpeg' ? 'jpg' : fmt}` : `${res.stem}.mp4`;
+      $('#renameFiles').replaceChildren('完成後會存成 ', h('b', { text: name }), n > 1 ? ` 等 ${n} 張` : '');
+    }
+  }, 150);
+}
+async function saveRename(e) {
+  e.preventDefault();
+  const t = renaming;
+  if (!t) return;
+  clearTimeout(renameTimer);
+  $('#renameSave').disabled = true;
+  try {
+    const res = await api(renamePath(t), { method: 'POST', json: { name: $('#renameInput').value } });
+    $('#renameDialog').close();
+    toast(res.missing ? `已改名；有 ${res.missing} 個檔案找不到（可能被移走或刪除了），沒有改到` : '已改名');
+    refreshTasks();
+  } catch (err) {
+    $('#renameErr').textContent = err.message;
+    $('#renameErr').hidden = false;
+  } finally {
+    $('#renameSave').disabled = false;
+  }
+}
+
+// ---------- 從檔案還原設定：把生成的檔案拖到任務區，或按「從檔案還原…」 ----------
+// 生成的檔案裡寫著生成設定（video_ui.py 的 build_meta，格式見 media_meta.py）。沒有的（有內容憑證的圖片、
+// 關掉了寫入設定、更新前的檔案）請伺服器用檔名或檔案內容（SHA-256）比對任務紀錄。
+const META_APP = 'ai-video-gen';
+const MP4_META_TAG = '429e443e5b154a5c9aea2b34b4828c77';  // media_meta.MP4_UUID：我們寫的 free box 開頭
+const u32 = (b, i) => ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0;
+const u32le = (b, i) => (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0;
+const ascii = (b, i, n) => String.fromCharCode(...b.subarray(i, i + n));
+const hexOf = b => [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+function pngMeta(b) {  // iTXt：關鍵字\0、壓縮旗標、壓縮方式、語言標籤\0、翻譯的關鍵字\0、內容
+  const key = META_APP + '\0';
+  for (let pos = 8; pos + 12 <= b.length;) {
+    const len = u32(b, pos), type = ascii(b, pos + 4, 4), data = b.subarray(pos + 8, pos + 8 + len);
+    if (type === 'iTXt' && ascii(data, 0, key.length) === key && data[key.length] === 0) {
+      const lang = data.indexOf(0, key.length + 2), tr = lang < 0 ? -1 : data.indexOf(0, lang + 1);
+      return tr < 0 ? null : data.subarray(tr + 1);
+    }
+    if (type === 'IEND') break;
+    pos += 12 + len;
+  }
+  return null;
+}
+function jpegMeta(b) {  // COM 段：AIVG、第幾段、共幾段、內容
+  const parts = [];
+  let total = 0;
+  for (let pos = 2; pos + 4 <= b.length && b[pos] === 0xFF;) {
+    const marker = b[pos + 1];
+    if (marker === 0xFF) { pos++; continue; }
+    if (marker === 0xDA || marker === 0xD9) break;  // 影像資料開始
+    const len = (b[pos + 2] << 8) | b[pos + 3];
+    if (marker === 0xFE && ascii(b, pos + 4, 4) === 'AIVG') { parts[b[pos + 8]] = b.subarray(pos + 10, pos + 2 + len); total = b[pos + 9]; }
+    pos += 2 + len;
+  }
+  if (!total || parts.length !== total || parts.includes(undefined)) return null;
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  parts.reduce((off, p) => (out.set(p, off), off + p.length), 0);
+  return out;
+}
+function webpMeta(b) {  // 最後一個 AIVG chunk
+  let found = null;
+  for (let pos = 12, end = Math.min(b.length, 8 + u32le(b, 4)); pos + 8 <= end;) {
+    const size = u32le(b, pos + 4);
+    if (ascii(b, pos, 4) === 'AIVG') found = b.subarray(pos + 8, pos + 8 + size);
+    pos += 8 + size + (size & 1);
+  }
+  return found;
+}
+async function mp4Meta(file) {  // 頂層的 free box、開頭是 MP4_META_TAG：只讀每個 box 的標頭，影片再大也很快
+  const read = async (a, z) => new Uint8Array(await file.slice(a, z).arrayBuffer());
+  let found = null;
+  for (let pos = 0, n = 0; pos + 8 <= file.size && n < 10000; n++) {
+    const head = await read(pos, pos + 16);
+    let size = u32(head, 0), header = 8;
+    if (size === 1) { size = u32(head, 8) * 2 ** 32 + u32(head, 12); header = 16; }
+    else if (size === 0) size = file.size - pos;
+    if (size < header || pos + size > file.size) break;
+    if (ascii(head, 4, 4) === 'free' && size >= header + 16 && hexOf(await read(pos + header, pos + header + 16)) === MP4_META_TAG)
+      found = await read(pos + header + 16, pos + size);
+    pos += size;
+  }
+  return found;
+}
+async function readMeta(file) {
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const kind = ascii(head, 4, 4) === 'ftyp' ? 'mp4' : sniffImage(head);
+  const whole = async () => new Uint8Array(await file.slice(0, Math.min(file.size, 64 * MB)).arrayBuffer());
+  const payload = kind === 'mp4' ? await mp4Meta(file) : kind === 'png' ? pngMeta(await whole())
+    : kind === 'jpeg' ? jpegMeta(await whole()) : kind === 'webp' ? webpMeta(await whole()) : null;
+  if (!payload) return null;
+  try {
+    const meta = JSON.parse(new TextDecoder().decode(payload));
+    return meta && typeof meta === 'object' && meta.app === META_APP ? meta : null;
+  } catch { return null; }
+}
+async function sha256Of(file) {
+  return hexOf(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())));
+}
+async function fileExists(url) {
+  try { return (await fetch(url, { method: 'HEAD' })).ok; } catch { return false; }
+}
+// 檔案裡的生成設定換成任務紀錄的樣子，交給 reuseTask。內容是檔案帶來的，不能照單全收：只留認得的欄位和型別；
+// 素材的本機副本要這台電腦上有（outputs/inputs/），不然用使用者自己貼的網址，都沒有就列為找不到
+async function taskFromMeta(meta) {
+  const str = (v, max) => typeof v === 'string' ? cut(v, max) : '';
+  const params = Object.fromEntries(Object.entries(meta.parameters && typeof meta.parameters === 'object' ? meta.parameters : {})
+    .filter(([k, v]) => k.length <= 40 && ['string', 'number', 'boolean'].includes(typeof v)).slice(0, 40));
+  const task = {
+    kind: meta.kind === 'image' ? 'image' : 'video', name: str(meta.name, 40), prompt: str(meta.prompt, 100000),
+    negative_prompt: str(meta.negative_prompt, 5000), provider: str(meta.provider, 40), model: str(meta.model, 200),
+    family: str(meta.family, 200), mode: meta.mode === 'frame' ? 'frame' : 'ref', parameters: params, media: [],
+  };
+  if (Number.isInteger(meta.count) && meta.count > 0) task.count = meta.count;
+  const missing = [];
+  for (const m of Array.isArray(meta.media) ? meta.media.slice(0, 50) : []) {
+    if (!m || typeof m !== 'object' || !SLOT_OF[m.type]) continue;
+    const item = { type: m.type, name: str(m.name, 200) };
+    for (const k of ['width', 'height', 'duration', 'bytes']) if (typeof m[k] === 'number') item[k] = m[k];
+    const key = ['ref', 'local'].find(k => typeof m[k] === 'string' && /^[0-9a-f]{20}\.[a-z0-9]{1,8}$/.test(m[k]));
+    if (key && await fileExists('/outputs/inputs/' + m[key])) item[key] = m[key];
+    else if (typeof m.url === 'string' && isHttpUrl(m.url)) item.url = m.url;
+    else { missing.push(item.name || SLOT_NAME[SLOT_OF[m.type]]); continue; }
+    task.media.push(item);
+  }
+  return { task, missing };
+}
+async function restoreFromFiles(files) {
+  const file = files[0];
+  if (!file) return;
+  if (files.length > 1) toast(`一次只能還原一個檔案，這次用「${file.name}」`);
+  try {
+    const meta = await readMeta(file).catch(() => null);
+    // 任務還在列表上就用它的紀錄（素材最齊全），並標出是哪一個
+    let t = meta?.task_id ? tasks.find(x => x.task_id === meta.task_id) : null;
+    if (!t && !meta) {
+      const info = { name: file.name, size: file.size };
+      let res = await api('/api/find-output', { method: 'POST', json: info });
+      if (res.need_hash) res = await api('/api/find-output', { method: 'POST', json: { ...info, sha256: await sha256Of(file) } });
+      t = res.task_id ? tasks.find(x => x.task_id === res.task_id) : null;
+    }
+    if (t) {
+      if (reuseTask(t)) flashTask(t.task_id);
+      return;
+    }
+    if (!meta) {
+      toast(`「${file.name}」裡沒有生成設定，任務列表裡也找不到這個檔案，沒辦法還原。要當素材用的話，請拖到左邊。`, 'error');
+      return;
+    }
+    const { task, missing } = await taskFromMeta(meta);
+    // 網址素材一加入就會載入預覽：檔案可能是別人給的，先問過再去連那些網址
+    const urls = task.media.filter(m => m.url).map(m => m.url);
+    if (urls.length && !confirm(`這個檔案的設定裡有 ${urls.length} 個網址素材，加入後瀏覽器會去載入它們的預覽：\n\n`
+      + urls.slice(0, 5).map(u => oneLine(u, 120)).join('\n') + (urls.length > 5 ? `\n…等 ${urls.length} 個` : '') + '\n\n要一起加入嗎？')) {
+      task.media = task.media.filter(m => !m.url);
+      missing.push(...urls.map(u => `網址 ${oneLine(u, 60)}`));
+    }
+    if (reuseTask(task, { fromFile: true }) && missing.length)
+      toast(`有 ${missing.length} 個素材沒有加入：${missing.join('、')}，需要的話請重新加入`, 'error');
+  } catch (e) {
+    toast('沒辦法從這個檔案還原：' + e.message, 'error');
   }
 }
 
@@ -2529,6 +2826,8 @@ function renderSettings() {
   $('#notifyTest').disabled = !notifySupported();
   $('#soundOn').checked = !!settings?.sound;
   $('#soundOn').disabled = !notifyOk;
+  $('#embedMeta').checked = settings?.embed_meta !== false;
+  $('#embedMeta').disabled = !(ok && 'embed_meta' in settings);  // 舊版伺服器沒有這個選項
   $('#soundTest').disabled = !audioSupported();
   renderNotifyHint();
   renderUpdate();
@@ -2835,7 +3134,7 @@ function noticeOf(t) {
   const took = t.finished_at ? ` · 耗時 ${fmtClock(t.finished_at - t.created_at)}` : '';
   // 失敗的說明第一行是中文的原因，後面才是供應商的原始訊息
   const brief = failed ? oneLine(String(t.error || '').split('\n')[0], 100)
-    : oneLine(t.prompt, 80) || (t.imported ? '（用 ID 查詢的任務）' : '（沒有提示詞）');
+    : oneLine(t.title || t.prompt, 80) || (t.imported ? '（用 ID 查詢的任務）' : '（沒有提示詞）');
   return {
     title, brief, failed, task: t, tag: 'task-' + t.task_id,
     body: model + took + (brief ? '\n' + brief : ''),
@@ -3155,19 +3454,32 @@ function bindEvents() {
 
   $('#filePicker').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; addFiles(files, pickerSlot); });
 
-  // 拖放檔案：丟到哪裡都行，依檔案類型分類；首尾幀模式可指定丟到哪一格
+  // 拖放檔案：丟到右邊的任務區是從檔案還原設定；其他地方都當素材，依檔案類型分類，首尾幀模式可指定丟到哪一格
   const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+  const endDrag = () => { depth = 0; document.body.classList.remove('file-drag'); $('.tasks').classList.remove('drop-hot'); };
   let depth = 0;
   document.addEventListener('dragenter', e => { if (hasFiles(e)) { depth++; document.body.classList.add('file-drag'); } });
-  document.addEventListener('dragleave', e => { if (hasFiles(e) && --depth <= 0) { depth = 0; document.body.classList.remove('file-drag'); } });
-  document.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  document.addEventListener('dragleave', e => { if (hasFiles(e) && --depth <= 0) endDrag(); });
+  document.addEventListener('dragover', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    $('.tasks').classList.toggle('drop-hot', !!e.target.closest?.('.tasks'));
+  });
   document.addEventListener('drop', e => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    depth = 0;
-    document.body.classList.remove('file-drag');
-    addFiles([...e.dataTransfer.files], e.target.closest?.('[data-drop]')?.dataset.drop);
+    endDrag();
+    if (e.target.closest?.('.tasks')) restoreFromFiles([...e.dataTransfer.files]);
+    else addFiles([...e.dataTransfer.files], e.target.closest?.('[data-drop]')?.dataset.drop);
   });
+  $('#restoreBtn').addEventListener('click', () => $('#restorePicker').click());
+  $('#restorePicker').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; restoreFromFiles(files); });
+  $('#taskName').addEventListener('input', e => { state.name = e.target.value; renderFileHint(); saveSoon(); });
+  $('#renameForm').addEventListener('submit', saveRename);
+  $('#renameInput').addEventListener('input', previewRename);
+  $('#renameCancel').addEventListener('click', () => $('#renameDialog').close());
+  $('#renameDialog').addEventListener('close', () => { renaming = null; });
   document.addEventListener('paste', e => {
     const files = [...(e.clipboardData?.files || [])];
     if (!files.length) return;
@@ -3193,6 +3505,7 @@ function bindEvents() {
   });
   $('#notifyTest').addEventListener('click', testNotify);
   $('#soundOn').addEventListener('change', e => { saveSetting({ sound: e.target.checked }); wakeAudio(); });
+  $('#embedMeta').addEventListener('change', e => saveSetting({ embed_meta: e.target.checked }));
   $('#soundTest').addEventListener('click', () => { playChime('success'); playChime('failure', 0.9); });
   $('#outDirOpen').addEventListener('click', openOutDir);
   $('#outDirPick').addEventListener('click', pickOutDir);
@@ -3252,6 +3565,7 @@ async function init() {
   $('#kindSwitch').hidden = !IMAGE_CATALOG;
   $('#prompt').value = state.prompt;
   $('#negPrompt').value = state.negative;
+  $('#taskName').value = state.name;
   $('#optimize').checked = state.optimize;
   $('#ttl').value = state.ttl;
   bindEvents();
@@ -3292,6 +3606,7 @@ async function init() {
   if (serverOk && !keySource()) openKeyDialog();
   setInterval(tickTimes, 1000);
   setInterval(renderMedia, 60000);  // 更新臨時連結是否過期
+  setInterval(renderFileHint, 30000);  // 「存成…」的檔名裡有現在的時間
 }
 init();
 </script>
