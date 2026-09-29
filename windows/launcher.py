@@ -7,6 +7,8 @@
   也沒有進行中的任務 10 分鐘後自己結束。不用 pythonw.exe：沒有主控台的程式每次呼叫 git（自動更新）
   都會閃出一個黑色視窗。
 - 輸出接在 outputs\\video_ui.log 後面；伺服器沒有啟動成功時，在這個視窗顯示記錄的最後幾行。
+- .cmd 沒辦法有自己的圖示，所以第一次執行時在專案資料夾建立一個有圖示（windows\\icon.ico）的
+  「AI 影片生成」捷徑。捷徑存的是絕對路徑，不能放進 git，只能在每台電腦上建立。
 
 參數 --no-browser：只啟動伺服器，不打開瀏覽器。埠號看環境變數 VIDEO_UI_PORT（預設 8765）。
 在 macOS／Linux 上也能執行（方便測試），不過那邊平常用 App 或直接執行 video_ui.py。
@@ -37,6 +39,10 @@ PORT = os.environ.get("VIDEO_UI_PORT") or "8765"
 URL = f"http://127.0.0.1:{PORT}/"
 IDLE_EXIT = 600  # 和 launch.sh 一樣
 WAIT = 60  # 最多等伺服器幾秒：有新版時要先下載、更新再重新啟動，Windows 上 git 和 Python 啟動都比較慢
+CMD = ROOT / "AI 影片生成.cmd"
+SHORTCUT = ROOT / "AI 影片生成.lnk"
+ICON = ROOT / "windows" / "icon.ico"
+SHORTCUT_MARK = OUTPUTS / "shortcut.txt"  # 建立過捷徑的專案位置：使用者刪掉捷徑就不再建立，資料夾搬家才重建
 CHECK = "import sys, requests; sys.exit(sys.version_info < (3, 9))"  # 能跑伺服器的 Python：3.9 以上、裝了 requests
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 直接連本機，不走系統設定的 proxy
 
@@ -169,6 +175,37 @@ def tail(lines=12):
     return "\n".join(text.splitlines()[-lines:])
 
 
+def make_shortcut():
+    """在專案資料夾建立有圖示的捷徑。捷徑指向 cmd.exe /c "AI 影片生成.cmd"，而不是直接指向 .cmd：
+    這樣才能釘選到工作列和開始功能表。用 PowerShell 呼叫 WScript.Shell，不必另外安裝套件；
+    路徑用環境變數傳，腳本裡也不放雙引號（[char]34），不用處理命令列的引號跳脫和中文。失敗就算了，不影響啟動。"""
+    if not (WINDOWS and ICON.exists() and CMD.exists()):
+        return
+    try:
+        if SHORTCUT_MARK.read_text(encoding="utf-8").strip() == str(ROOT):
+            return
+    except OSError:
+        pass
+    script = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:AVG_LNK); "
+              "$s.TargetPath = $env:ComSpec; $q = [char]34; $s.Arguments = '/c ' + $q + $q + $env:AVG_CMD + $q + $q; "
+              "$s.WorkingDirectory = $env:AVG_ROOT; $s.IconLocation = $env:AVG_ICON + ',0'; "
+              "$s.Description = $env:AVG_DESC; $s.Save()")
+    env = {**os.environ, "AVG_LNK": str(SHORTCUT), "AVG_CMD": str(CMD), "AVG_ROOT": str(ROOT),
+           "AVG_ICON": str(ICON), "AVG_DESC": "在背景啟動 AI 影片生成，準備好後打開瀏覽器"}
+    try:
+        ok = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], env=env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=30, creationflags=subprocess.CREATE_NO_WINDOW).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if ok and SHORTCUT.exists():
+        try:
+            SHORTCUT_MARK.write_text(str(ROOT), encoding="utf-8")
+        except OSError:
+            pass
+        print("已在專案資料夾建立有圖示的「AI 影片生成」捷徑，可以複製到桌面，或按右鍵釘選到工作列、開始功能表。")
+
+
 def main():
     p = argparse.ArgumentParser(description="在背景啟動影片和圖片生成介面，準備好後打開瀏覽器（「AI 影片生成.cmd」用）")
     p.add_argument("--no-browser", action="store_true", help="只啟動伺服器，不打開瀏覽器")
@@ -181,6 +218,7 @@ def main():
         fail(f"環境變數 VIDEO_UI_PORT 要是埠號（例如 8765），現在是「{PORT}」。")
 
     wait_turn()
+    make_shortcut()
     if running():
         status = "伺服器已經在執行"
     else:

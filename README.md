@@ -131,6 +131,8 @@ App 啟動的伺服器會在網頁關閉、沒有進行中任務且閒置 10 分
 
 雙擊專案根目錄的 `AI 影片生成.cmd`（檔案總管預設隱藏副檔名，會顯示成「AI 影片生成」）。它和 macOS App 一樣：伺服器沒在跑就在背景啟動，準備好後打開瀏覽器。啟動時會出現一個小視窗顯示進度，打開瀏覽器後自動關閉；沒有啟動成功時，視窗會留著顯示原因和記錄的最後幾行。`AI 影片生成.app` 資料夾是 macOS 用的，Windows 上用不到。
 
+`.cmd` 檔沒辦法換圖示，所以第一次雙擊時會在專案資料夾自動建立一個有圖示的「AI 影片生成」捷徑，之後雙擊捷徑或 `.cmd` 都可以。捷徑可以複製到桌面，也可以按右鍵釘選到工作列或開始功能表。刪掉捷徑就不會再建立；整個專案資料夾搬到別的地方時，下次雙擊 `.cmd` 會重建一個指向新位置的捷徑。
+
 - **Python**：優先使用專案裡的 `.venv`，其次是 `python` 指令或 `py` 啟動器找到的 Python 3.9 以上版本。缺少 `requests` 時會詢問要不要用 pip 安裝；完全找不到 Python 時，會說明安裝方式並可直接打開 python.org 的下載頁。
 - **背景執行**：伺服器在背景執行，不會出現視窗，和 App 一樣在網頁關閉、沒有進行中任務且閒置 10 分鐘後自動結束。要馬上結束，可以在工作管理員結束「Python」。
 - **記錄與連接埠**：啟動記錄同樣寫在 `outputs\video_ui.log`；要改用其他連接埠，設定環境變數 `VIDEO_UI_PORT`（例如 `setx VIDEO_UI_PORT 9000`）。
@@ -275,7 +277,8 @@ outputs/
 ├── settings.json          # 選項（主題、語言、自動更新、通知、提示音、輸出資料夾、在檔案裡記下生成設定）
 ├── inputs/                # 本機素材副本
 ├── video_ui.log           # macOS App 和 Windows 啟動器的背景啟動記錄
-└── launcher.lock          # Windows 啟動器用來避免重複啟動的空檔案
+├── launcher.lock          # Windows 啟動器用來避免重複啟動的空檔案
+└── shortcut.txt           # Windows 啟動器建立捷徑時的專案位置（刪掉捷徑後不再建立用）
 ```
 
 在選項換了輸出資料夾的話，之後下載的影片和圖片存在那個資料夾，其他檔案照樣在 `outputs/`。
@@ -298,7 +301,8 @@ outputs/
 ├── AI 影片生成.app/   # macOS 雙擊啟動器
 ├── AI 影片生成.cmd    # Windows 雙擊啟動器：找到 Python 後執行 windows/launcher.py
 └── windows/
-    └── launcher.py    # Windows 啟動器本體：背景啟動伺服器、等它準備好、打開瀏覽器
+    ├── launcher.py    # Windows 啟動器本體：背景啟動伺服器、等它準備好、打開瀏覽器、建立有圖示的捷徑
+    └── icon.ico       # Windows 捷徑的圖示
 ```
 
 若要新增影片模型，先在 `video_models.py` 加入模型規格；圖片模型則加在 `image_models.py`。若 payload 格式不同，再於對應的 API 模組處理轉換。

@@ -43,6 +43,9 @@ __pycache__/
 .venv/
 venv/
 
+# Windows 啟動器在每台電腦建立的捷徑（存的是本機的絕對路徑）
+*.lnk
+
 # 本機工具設定與系統檔
 .claude/
 .DS_Store

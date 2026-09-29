@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>影片生成</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235a4ee6'/%3E%3Cstop offset='1' stop-color='%23b04fe6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='2' y='2' width='60' height='60' rx='13.5' fill='url(%23g)'/%3E%3Cpath d='M25.5 20.4L25.5 43.6L45.7 32Z' fill='%23fff' stroke='%23fff' stroke-width='7' stroke-linejoin='round'/%3E%3Cpath d='M47.9 10.4Q48.8 15.2 53.6 16.1Q48.8 17 47.9 21.8Q47 17 42.2 16.1Q47 15.2 47.9 10.4Z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='5.5 5.5 53 53'%3E%3Cstyle%3E.s{fill:%231f1c2c}.h{fill:%23f3ead8}@media (prefers-color-scheme:dark){.s{fill:%23f3ead8}.h{fill:%231f1c2c}}%3C/style%3E%3Cg transform='rotate(-14 32 32)'%3E%3Crect class='s' x='15' y='10' width='34' height='44' rx='4'/%3E%3Cg class='h'%3E%3Crect x='18' y='14' width='3' height='4' rx='.8'/%3E%3Crect x='43' y='14' width='3' height='4' rx='.8'/%3E%3Crect x='18' y='22' width='3' height='4' rx='.8'/%3E%3Crect x='43' y='22' width='3' height='4' rx='.8'/%3E%3Crect x='18' y='30' width='3' height='4' rx='.8'/%3E%3Crect x='43' y='30' width='3' height='4' rx='.8'/%3E%3Crect x='18' y='38' width='3' height='4' rx='.8'/%3E%3Crect x='43' y='38' width='3' height='4' rx='.8'/%3E%3Crect x='18' y='46' width='3' height='4' rx='.8'/%3E%3Crect x='43' y='46' width='3' height='4' rx='.8'/%3E%3C/g%3E%3C/g%3E%3Cpath class='h' d='M32 23Q33.8 30.2 41 32Q33.8 33.8 32 41Q30.2 33.8 23 32Q30.2 30.2 32 23Z'/%3E%3C/svg%3E">
 <style>
 :root {
   --bg: #f5f5f7; --panel: #ffffff; --panel-2: #f0f0f4; --border: #e2e2e9; --border-strong: #cfcfd9;
@@ -14,6 +14,7 @@
   --run: #2563c9; --run-weak: #e6efff;
   --shadow: 0 1px 2px rgba(20, 20, 40, .05), 0 2px 8px rgba(20, 20, 40, .04);
   --radius: 12px;
+  --logo-ink: #1f1c2c; --logo-paper: #f3ead8;  /* logo 的膠卷／齒孔與星芒，暗色時對調 */
   color-scheme: light;
 }
 /* 暗色：選項的主題是「跟隨系統」時看系統設定，選「暗色」時一律套用（video_ui.py 把設定填進 <html data-theme>）。
@@ -26,6 +27,7 @@
     --ok: #4cc47f; --ok-weak: #173323; --warn: #e3a93e; --warn-weak: #3a2c10; --err: #f07070; --err-weak: #3d1a1a;
     --run: #6ea1ff; --run-weak: #1a2640;
     --shadow: none;
+    --logo-ink: #f3ead8; --logo-paper: #1f1c2c;
     color-scheme: dark;
   }
 }
@@ -36,6 +38,7 @@
   --ok: #4cc47f; --ok-weak: #173323; --warn: #e3a93e; --warn-weak: #3a2c10; --err: #f07070; --err-weak: #3d1a1a;
   --run: #6ea1ff; --run-weak: #1a2640;
   --shadow: none;
+  --logo-ink: #f3ead8; --logo-paper: #1f1c2c;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -448,11 +451,10 @@ dialog .set-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0
 <body>
 <header class="topbar">
   <div class="brand">
-    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
-      <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a4ee6"/><stop offset="1" stop-color="#b04fe6"/></linearGradient></defs>
-      <rect x="2" y="2" width="60" height="60" rx="13.5" fill="url(#logoGrad)"/>
-      <path d="M25.5 20.4L25.5 43.6L45.7 32Z" fill="#fff" stroke="#fff" stroke-width="7" stroke-linejoin="round"/>
-      <path d="M47.9 10.4Q48.8 15.2 53.6 16.1Q48.8 17 47.9 21.8Q47 17 42.2 16.1Q47 15.2 47.9 10.4Z" fill="#fff"/>
+    <svg class="logo" viewBox="5.5 5.5 53 53" aria-hidden="true">
+      <g transform="rotate(-14 32 32)"><rect x="15" y="10" width="34" height="44" rx="4" fill="var(--logo-ink)"/>
+        <g fill="var(--logo-paper)"><rect x="18" y="14" width="3" height="4" rx=".8"/><rect x="43" y="14" width="3" height="4" rx=".8"/><rect x="18" y="22" width="3" height="4" rx=".8"/><rect x="43" y="22" width="3" height="4" rx=".8"/><rect x="18" y="30" width="3" height="4" rx=".8"/><rect x="43" y="30" width="3" height="4" rx=".8"/><rect x="18" y="38" width="3" height="4" rx=".8"/><rect x="43" y="38" width="3" height="4" rx=".8"/><rect x="18" y="46" width="3" height="4" rx=".8"/><rect x="43" y="46" width="3" height="4" rx=".8"/></g></g>
+      <path d="M32 23Q33.8 30.2 41 32Q33.8 33.8 32 41Q30.2 33.8 23 32Q30.2 30.2 32 23Z" fill="var(--logo-paper)"/>
     </svg>
     <div><h1 id="brandTitle">影片生成</h1><p id="brandSub"></p></div>
   </div>

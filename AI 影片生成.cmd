@@ -8,7 +8,7 @@ rem 所以執行 launcher.py 那一行的最後用 exit /b 結束，之後不會
 rem 刻意不用標籤和 goto：換行被改成 LF 時，cmd.exe 找標籤可能會跳錯行。
 setlocal EnableExtensions DisableDelayedExpansion
 title AI 影片生成
-if not exist "%~dp0windows\launcher.py" echo 找不到 windows\launcher.py。這個檔案要留在專案資料夾裡（和 video_ui.py 同一層），想放在桌面請改用右鍵的「傳送到 → 桌面（建立捷徑）」。 & pause & exit /b 1
+if not exist "%~dp0windows\launcher.py" echo 找不到 windows\launcher.py。這個檔案要留在專案資料夾裡（和 video_ui.py 同一層），想放在桌面請複製資料夾裡有圖示的「AI 影片生成」捷徑（第一次從資料夾雙擊這個檔案時建立）。 & pause & exit /b 1
 set "PY_EXE="
 set "PY_ARG="
 set "PY_OK=import sys; sys.exit(sys.version_info < (3, 9))"
